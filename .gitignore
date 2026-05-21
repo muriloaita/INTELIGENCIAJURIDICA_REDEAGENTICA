@@ -1,0 +1,29 @@
+# Dependências
+node_modules/
+
+# Variáveis de ambiente (contém chaves secretas)
+.env
+.env.local
+.env.*.local
+
+# Uploads temporários
+backend/uploads/
+
+# Build
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Arquivos temporários de teste
+backend/search_test.json
+backend/search_cat.json
