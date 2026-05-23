@@ -85,6 +85,10 @@ Retorne um relatório estruturado com:
       prompt += `OBSERVAÇÕES ADICIONAIS:\n${prazoData.observacao}\n\n`;
     }
 
+    if (prazoData.documentosAnexos) {
+      prompt += `═══════════════════════════════════════════════════════\nCONTEÚDO DOS DOCUMENTOS ANEXADOS AO PROCESSO:\n═══════════════════════════════════════════════════════\n${prazoData.documentosAnexos}\n\n`;
+    }
+
     prompt += `\nAnalise os dados acima e extraia TODAS as informações processuais relevantes de forma estruturada e completa.`;
 
     return prompt;

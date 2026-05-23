@@ -1,6 +1,5 @@
 {
   "name": "rede-ag-ntica-jur-dica",
-  "workspaces": ["frontend", "backend"], 
   "scripts": {
     "dev-frontend": "npm run dev --prefix frontend",
     "dev-backend": "npm run dev --prefix backend",

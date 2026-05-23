@@ -1,176 +1,141 @@
 /**
- * DocumentProcessor - Processamento de documentos jurídicos
- * Extração de texto (PDF, DOCX), chunking e inferência de categoria
+ * documentProcessor.js — RAG Document Processor
+ * Tesseract OCR nativo via child_process + pdf-parse + mammoth
  */
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import os from 'os';
 
+const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const pdfParseModule = require('pdf-parse');
 const PDFParse = pdfParseModule.PDFParse || pdfParseModule.default || pdfParseModule;
 const mammoth = require('mammoth');
 
-/**
- * Extrai texto de um arquivo PDF
- * @param {string} filePath - Caminho do arquivo PDF
- * @returns {Promise<string>} - Texto extraído
- */
-export async function extractTextFromPDF(filePath) {
-  const buffer = fs.readFileSync(filePath);
-  const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+const TESSERACT_LANG = 'por';
+const DPI_SCAN = 300;
+const LIMITE_CHARS = 50;
+const TESSERACT_PATHS = [
+  'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
+  'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe',
+  path.join(os.homedir(), 'AppData', 'Local', 'Tesseract-OCR', 'tesseract.exe'),
+];
+
+let tesseractPath = null;
+let tesseractAvailable = null;
+
+async function findTesseract() {
+  if (tesseractAvailable !== null) return tesseractAvailable ? tesseractPath : null;
   try {
-    const parser = new PDFParse(uint8);
-    await parser.load();
-    const result = await parser.getText();
-    // result pode ser string ou objeto com .text
-    const text = typeof result === 'string' ? result : (result?.text || '');
-    return text;
-  } catch (err) {
-    console.error('[DocumentProcessor] Erro ao extrair PDF:', err.message);
-    return '';
-  }
-}
-
-/**
- * Extrai texto de um arquivo DOCX
- * @param {string} filePath - Caminho do arquivo DOCX
- * @returns {Promise<string>} - Texto extraído
- */
-export async function extractTextFromDOCX(filePath) {
-  const result = await mammoth.extractRawText({ path: filePath });
-  return result.value || '';
-}
-
-/**
- * Extrai texto de um arquivo com base na extensão
- * @param {string} filePath - Caminho do arquivo
- * @returns {Promise<string|null>} - Texto extraído ou null se formato não suportado
- */
-export async function extractTextFromFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-
-  switch (ext) {
-    case '.pdf':
-      return extractTextFromPDF(filePath);
-    case '.docx':
-      return extractTextFromDOCX(filePath);
-    case '.txt':
-      return fs.readFileSync(filePath, 'utf-8');
-    case '.xlsx':
-    case '.jpg':
-    case '.jpeg':
-    case '.png':
-    case '.mp4':
-    case '.zip':
-    case '.rar':
-      return null;
-    default:
-      return null;
-  }
-}
-
-/**
- * Divide texto em chunks por palavras com overlap
- * @param {string} text - Texto para dividir
- * @param {number} chunkSize - Número de palavras por chunk (padrão: 800)
- * @param {number} overlap - Número de palavras de sobreposição (padrão: 200)
- * @returns {string[]} - Array de chunks
- */
-export function chunkText(text, chunkSize = 800, overlap = 200) {
-  if (!text || text.trim().length === 0) return [];
-
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length === 0) return [];
-
-  const chunks = [];
-  let start = 0;
-
-  while (start < words.length) {
-    const end = Math.min(start + chunkSize, words.length);
-    const chunk = words.slice(start, end).join(' ');
-    chunks.push(chunk);
-
-    if (end >= words.length) break;
-    start += chunkSize - overlap;
-  }
-
-  return chunks;
-}
-
-/**
- * Infere a categoria jurídica a partir do caminho do arquivo
- * @param {string} filePath - Caminho do arquivo
- * @returns {string} - Categoria inferida
- */
-export function inferCategoria(filePath) {
-  const normalizado = filePath.toLowerCase();
-
-  const categorias = [
-    { pattern: 'embargos de declara', categoria: 'embargos_declaracao' },
-    { pattern: 'recurso de apela', categoria: 'recurso_apelacao' },
-    { pattern: 'agravo de instrumento', categoria: 'agravo_instrumento' },
-    { pattern: 'impugna', categoria: 'impugnacao' },
-    { pattern: 'contrarraz', categoria: 'contrarrazoes' },
-    { pattern: 'manifesta', categoria: 'manifestacao' },
-    { pattern: 'quesitos', categoria: 'quesitos' },
-    { pattern: 'peti\u00e7\u00e3o inicial', categoria: 'peticao_inicial' },
-    { pattern: 'peticao inicial', categoria: 'peticao_inicial' },
-    { pattern: 'inicial', categoria: 'peticao_inicial' },
-    { pattern: 'modelo', categoria: 'modelo' },
-    { pattern: 'recurso especial', categoria: 'recurso_especial' },
-    { pattern: 'recurso extraordin', categoria: 'recurso_extraordinario' },
-    { pattern: 'a\u00e7\u00e3o rescis', categoria: 'acao_rescisoria' },
-    { pattern: 'mandado de seguran', categoria: 'mandado_seguranca' },
-    { pattern: 'habeas corpus', categoria: 'habeas_corpus' },
-    { pattern: 'execu\u00e7\u00e3o', categoria: 'execucao' },
-    { pattern: 'cumprimento de senten', categoria: 'cumprimento_sentenca' },
-    { pattern: 'contesta\u00e7\u00e3o', categoria: 'contestacao' },
-    { pattern: 'r\u00e9plica', categoria: 'replica' },
-    { pattern: 'alega\u00e7\u00f5es finais', categoria: 'alegacoes_finais' },
-    { pattern: 'parecer', categoria: 'parecer' },
-    { pattern: 'memorial', categoria: 'memorial' },
-    { pattern: 'embargo', categoria: 'embargos' },
-    { pattern: 'apela\u00e7\u00e3o', categoria: 'apelacao' },
-    { pattern: 'agravo', categoria: 'agravo' },
-  ];
-
-  for (const { pattern, categoria } of categorias) {
-    if (normalizado.includes(pattern)) {
-      return categoria;
+    const { stdout } = await execFileAsync('tesseract', ['--version'], { timeout: 5000 });
+    tesseractPath = 'tesseract'; tesseractAvailable = true;
+    console.log(`[OCR] Tesseract no PATH: ${stdout.split('\n')[0]}`); return tesseractPath;
+  } catch {}
+  for (const p of TESSERACT_PATHS) {
+    if (fs.existsSync(p)) {
+      try {
+        const { stdout } = await execFileAsync(p, ['--version'], { timeout: 5000 });
+        tesseractPath = p; tesseractAvailable = true;
+        console.log(`[OCR] Tesseract: ${p}`); return tesseractPath;
+      } catch {}
     }
   }
-
-  return 'geral';
+  tesseractAvailable = false;
+  console.warn('[OCR] Tesseract NAO encontrado. Instale: https://github.com/UB-Mannheim/tesseract/wiki');
+  return null;
 }
 
-/**
- * Processa um documento completo: extrai texto, divide em chunks e retorna metadados
- * @param {string} filePath - Caminho do arquivo
- * @param {string|null} categoria - Categoria (se null, infere automaticamente)
- * @param {string} fonte - Fonte do documento
- * @returns {Promise<object[]|null>} - Array de objetos chunk ou null se não processável
- */
+export async function extractTextFromImage(filePath) {
+  try {
+    const tess = await findTesseract();
+    if (!tess) return '';
+    const { stdout } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6'], { timeout: 60000, maxBuffer: 10*1024*1024 });
+    return stdout.trim();
+  } catch (err) { console.error(`[OCR] Erro: ${err.message}`); return ''; }
+}
+
+export async function extractTextFromPDF(filePath) {
+  try {
+    const dataBuffer = fs.readFileSync(filePath);
+    const pdfData = await PDFParse(dataBuffer);
+    const digitalText = (pdfData.text || '').trim();
+    if (digitalText.length >= LIMITE_CHARS) return digitalText;
+    const tess = await findTesseract();
+    if (!tess) return digitalText;
+    try {
+      const { stdout } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
+      const ocrText = stdout.trim();
+      if (ocrText.length > digitalText.length) return ocrText;
+    } catch {}
+    return digitalText;
+  } catch (err) { console.error(`[PDF] Erro: ${err.message}`); return ''; }
+}
+
+export async function extractTextFromDocx(filePath) {
+  try {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return (result.value || '').trim();
+  } catch (err) { console.error(`[DOCX] Erro: ${err.message}`); return ''; }
+}
+
+export async function extractTextFromTxt(filePath) {
+  try { return fs.readFileSync(filePath, 'utf-8').trim(); }
+  catch (err) { console.error(`[TXT] Erro: ${err.message}`); return ''; }
+}
+
+export function inferCategoria(fileName, textContent = '') {
+  const name = (fileName || '').toLowerCase();
+  const text = (textContent || '').toLowerCase().substring(0, 2000);
+  if (name.includes('peticao') || name.includes('petição') || text.includes('excelentíssimo')) return 'peticao';
+  if (name.includes('contrato') || text.includes('contratante')) return 'contrato';
+  if (name.includes('sentenca') || name.includes('sentença') || text.includes('julgo')) return 'sentenca';
+  if (name.includes('despacho') || text.includes('despacho')) return 'despacho';
+  if (name.includes('acordao') || name.includes('acórdão')) return 'acordao';
+  if (name.includes('recurso') || text.includes('apelação') || text.includes('agravo')) return 'recurso';
+  if (name.includes('procuracao') || name.includes('procuração')) return 'procuracao';
+  if (name.includes('extrato') || text.includes('extrato')) return 'extrato';
+  return 'documento_juridico';
+}
+
 export async function processDocument(filePath, categoria = null, fonte = 'upload') {
-  const text = await extractTextFromFile(filePath);
-  if (!text || text.trim().length === 0) return null;
-
-  const cat = categoria || inferCategoria(filePath);
+  const ext = path.extname(filePath).toLowerCase();
   const fileName = path.basename(filePath);
-  const chunks = chunkText(text);
-
-  return chunks.map((conteudo, index) => ({
-    titulo: `${fileName} — Parte ${index + 1}/${chunks.length}`,
-    conteudo,
-    chunk_index: index,
-    total_chunks: chunks.length,
-    documento_origem: fileName,
-    categoria: cat,
-    fonte,
-    metadata: {
-      file_path: filePath,
-      file_size: fs.statSync(filePath).size,
-      extracted_at: new Date().toISOString(),
-    },
+  let text = '';
+  switch (ext) {
+    case '.pdf': text = await extractTextFromPDF(filePath); break;
+    case '.docx': case '.doc': text = await extractTextFromDocx(filePath); break;
+    case '.txt': case '.md': text = await extractTextFromTxt(filePath); break;
+    case '.jpg': case '.jpeg': case '.png': case '.bmp':
+    case '.tiff': case '.tif': case '.webp': text = await extractTextFromImage(filePath); break;
+    default: return [];
+  }
+  if (!text || text.length < 10) return [];
+  const cat = categoria || inferCategoria(fileName, text);
+  const chunks = chunkText(text, 1500, 200);
+  return chunks.map((chunk, i) => ({
+    content: chunk,
+    metadata: { fileName, categoria: cat, fonte, chunkIndex: i, totalChunks: chunks.length, extractedAt: new Date().toISOString() },
   }));
+}
+
+function chunkText(text, chunkSize = 1500, overlap = 200) {
+  const chunks = []; let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + chunkSize, text.length);
+    if (end < text.length) {
+      const bp = Math.max(text.lastIndexOf('.', end), text.lastIndexOf('\n', end));
+      if (bp > start + chunkSize * 0.5) end = bp + 1;
+    }
+    chunks.push(text.slice(start, end).trim());
+    start = end - overlap;
+    if (start >= text.length) break;
+  }
+  return chunks.filter(c => c.length > 0);
+}
+
+export async function terminateTesseractWorker() {
+  console.log('[OCR] Tesseract nativo — sem workers.');
 }

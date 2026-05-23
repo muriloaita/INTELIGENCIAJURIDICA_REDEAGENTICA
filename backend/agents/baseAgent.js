@@ -64,21 +64,53 @@ export class BaseAgent {
       config.useGrounding = true;
     }
 
-    const startTime = Date.now();
-    const result = await vertexClient.generateContent(
-      this.model,
-      systemPrompt,
-      userPrompt,
-      config
-    );
-    const executionTime = Date.now() - startTime;
+    // ── Retry automático para erros transientes (503, 429) ──
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
 
-    return {
-      result: result.text,
-      tokensInput: result.usageMetadata?.promptTokenCount || 0,
-      tokensOutput: result.usageMetadata?.candidatesTokenCount || 0,
-      executionTime,
-      groundingSources: result.groundingMetadata || [],
-    };
+    let lastError = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const startTime = Date.now();
+        const result = await vertexClient.generateContent(
+          this.model,
+          systemPrompt,
+          userPrompt,
+          config
+        );
+        const executionTime = Date.now() - startTime;
+
+        if (attempt > 0) {
+          console.log(`[${this.name}] ✅ Sucesso na tentativa ${attempt + 1} após retry.`);
+        }
+
+        return {
+          result: result.text,
+          tokensInput: result.usageMetadata?.promptTokenCount || 0,
+          tokensOutput: result.usageMetadata?.candidatesTokenCount || 0,
+          executionTime,
+          groundingSources: result.groundingMetadata || [],
+        };
+      } catch (error) {
+        lastError = error;
+        const isRetryable = error.message &&
+          (error.message.includes('503') ||
+           error.message.includes('429') ||
+           error.message.includes('UNAVAILABLE') ||
+           error.message.includes('high demand') ||
+           error.message.includes('overloaded') ||
+           error.message.includes('RESOURCE_EXHAUSTED'));
+
+        if (isRetryable && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt];
+          console.warn(`[${this.name}] ⚠️ Erro transiente (tentativa ${attempt + 1}/${MAX_RETRIES + 1}): ${error.message.substring(0, 100)}`);
+          console.warn(`[${this.name}] ⏳ Aguardando ${delay / 1000}s antes de tentar novamente...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          throw error; // Erro não recuperável ou esgotou tentativas
+        }
+      }
+    }
+    throw lastError;
   }
 }

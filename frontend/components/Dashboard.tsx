@@ -11,6 +11,7 @@ import { AguardandoProtocoloView } from './AguardandoProtocoloView';
 import { ConfigView } from './ConfigView';
 import { HistoricoView } from './HistoricoView';
 import { KnowledgeBaseView } from './KnowledgeBaseView';
+import { WorkflowPanel } from './WorkflowPanel';
 import { Icon } from './Icons';
 import { usePeticoesProntas, useHistorico, useAgentConfigs } from '../hooks/useSupabase';
 import { useWorkflow } from '../hooks/useWorkflow';
@@ -35,6 +36,14 @@ export const Dashboard: React.FC = () => {
     setActivePhaseId: setActiveStageId,
     setCompletedPhases: setCompletedStages,
     setPhaseResults,
+    docxDownloadUrl,
+    allWorkflows,
+    queue,
+    queueLength,
+    maxQueue,
+    canEnqueue,
+    respondToCheckpoint,
+    removeFromQueue,
   } = useWorkflow();
 
   const [peticoesProntas, setPeticoesProntas] = useState<PeticaoPronta[]>([]);
@@ -83,7 +92,7 @@ export const Dashboard: React.FC = () => {
     if ((simStatus === 'running' || simStatus === 'pendente') && prazoData) {
       const item: WorkflowHistoryItem = {
         id: `FLX-${Math.floor(Math.random() * 10000)}`,
-        data: new Date().toLocaleString('pt-BR'),
+        data: new Date().toISOString(),
         demanda: prazoData.demanda,
         autos: prazoData.autos,
         tipoPeticao: prazoData.tipoPeticao,
@@ -109,20 +118,20 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleBaixar = (id: string) => {
+    // Tentar encontrar o docxUrl de um workflow concluído
     const peticao = peticoesProntas.find(p => p.id === id) || peticoesAguardando.find(p => p.id === id);
-    if (!peticao) return;
-    // Usa o resultado real da fase 5 (Redação Estratégica) se disponível, senão gera um conteúdo básico
-    const content = phaseResults[5]
-      || `Petição gerada para o processo ${peticao.autos}\n\nDemanda: ${peticao.demanda}\nTipo: ${peticao.tipoPeticao}\n\n[Conteúdo será gerado pelo workflow real]`;
-    const blob = new Blob([content], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Peticao_${peticao.autos.replace(/[^a-zA-Z0-9]/g, '_')}.doc`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (peticao?.docxUrl) {
+      window.open(peticao.docxUrl, '_blank');
+      return;
+    }
+    // Tentar encontrar pelo workflow ativo
+    const wf = allWorkflows.find(w => w.docxUrl && (w.prazoData.autos === peticao?.autos));
+    if (wf?.docxUrl) {
+      window.open(wf.docxUrl, '_blank');
+      return;
+    }
+    // Fallback: endpoint direto com o id
+    window.open(`/api/workflow/${id}/docx`, '_blank');
   };
 
   const handleProtocolar = async (id: string) => {
@@ -142,31 +151,27 @@ export const Dashboard: React.FC = () => {
     alert('Protocolo confirmado com sucesso no sistema do tribunal!');
   };
 
-  // Quando o workflow completa via SSE, salvar a petição pronta e registrar no histórico
+  // Quando o workflow completa via SSE, recarregar dados do Supabase
+  // (a persistência agora é feita server-side para todos os workflows, incluindo enfileirados)
   useEffect(() => {
-    if (simStatus === 'completed' && prazoData) {
-      (async () => {
-        const novaPeticao: PeticaoPronta = {
-          ...prazoData,
-          id: `PET-${Math.floor(Math.random() * 10000)}`,
-          status: 'Aguardando Revisão',
-          dataConclusao: new Date().toLocaleString('pt-BR'),
-          tipoPeca: prazoData.tipoPeticao,
-        };
-        setPeticoesProntas(prev => [novaPeticao, ...prev]);
-        await db_peticoes.salvar(novaPeticao);
-
-        const item: WorkflowHistoryItem = {
-          id: `FLX-${Math.floor(Math.random() * 10000)}`,
-          data: new Date().toLocaleString('pt-BR'),
-          demanda: prazoData.demanda,
-          autos: prazoData.autos,
-          tipoPeticao: prazoData.tipoPeticao,
-          status: 'Concluído',
-        };
-        setHistorico(prev => [item, ...prev]);
-        await db_historico.registrar(item);
-      })();
+    if (simStatus === 'completed') {
+      // Dar um pequeno delay para o server salvar no Supabase antes de recarregar
+      const timer = setTimeout(async () => {
+        const [prontas, hist] = await Promise.all([
+          db_peticoes.listar(),
+          db_historico.listar(),
+        ]);
+        const aguardando = prontas.filter(p =>
+          p.status === 'Aguardando Protocolo' || p.status === 'Protocolada'
+        );
+        const efetivamenteProntas = prontas.filter(p =>
+          p.status === 'Aguardando Revisão' || p.status === 'Aprovada'
+        );
+        setPeticoesProntas(efetivamenteProntas);
+        setPeticoesAguardando(aguardando);
+        setHistorico(hist);
+      }, 3000);
+      return () => clearTimeout(timer);
     }
   }, [simStatus]);
 
@@ -270,21 +275,28 @@ export const Dashboard: React.FC = () => {
           
           {currentView === 'overview' && (
             <div className="flex items-center gap-4">
-              {simStatus === 'idle' || simStatus === 'completed' || simStatus === 'pendente' ? (
-                <button 
-                  onClick={handleStartClick}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition-all shadow-sm"
-                >
-                  <Icon name="Play" size={18} />
-                  Iniciar Fluxo
-                </button>
-              ) : (
+              {/* Botão Iniciar Fluxo — sempre visível para permitir cadastrar novos processos */}
+              <button 
+                onClick={handleStartClick}
+                disabled={!canEnqueue}
+                className={`flex items-center gap-2 px-5 py-2.5 font-bold rounded-lg transition-all shadow-sm ${
+                  canEnqueue
+                    ? 'bg-brand-600 hover:bg-brand-700 text-white'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                <Icon name="Plus" size={18} />
+                {canEnqueue ? 'Novo Processo' : `Fila Cheia (${queueLength}/${maxQueue})`}
+              </button>
+
+              {/* Botão Parar — só aparece quando há um workflow em execução */}
+              {(simStatus === 'running' || simStatus === 'awaiting_input') && (
                 <button 
                   onClick={stopSimulation}
                   className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-gray-50 text-red-600 border border-red-200 font-bold rounded-lg transition-all shadow-sm"
                 >
                   <Icon name="Square" size={18} />
-                  Parar Simulação
+                  Parar Fluxo
                 </button>
               )}
             </div>
@@ -335,17 +347,31 @@ export const Dashboard: React.FC = () => {
               )}
 
               {simStatus === 'completed' && (
-                <div className="mb-6 flex items-center gap-3 bg-green-50 border border-green-200 p-4 rounded-xl shadow-sm inline-flex">
-                  <Icon name="CheckCircle2" className="text-green-600" size={20} />
-                  <span className="text-green-700 font-bold">
-                    Fluxo concluído com sucesso. Peça disponível no módulo Petições Prontas.
-                  </span>
-                  <button 
-                    onClick={() => setCurrentView('prontas')}
-                    className="ml-4 px-3 py-1.5 bg-white border border-green-200 hover:bg-green-100 text-green-700 rounded-md text-sm font-bold transition-colors shadow-sm"
-                  >
-                    Ver Peça
-                  </button>
+                <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-green-50 border border-green-200 p-4 rounded-xl shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <Icon name="CheckCircle2" className="text-green-600" size={20} />
+                    <span className="text-green-700 font-bold">
+                      Fluxo concluído com sucesso. Peça disponível no módulo Petições Prontas.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 ml-0 sm:ml-auto">
+                    {docxDownloadUrl && (
+                      <a
+                        href={docxDownloadUrl}
+                        download
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-colors shadow-sm"
+                      >
+                        <Icon name="FileDown" size={16} />
+                        Download Word (.docx)
+                      </a>
+                    )}
+                    <button 
+                      onClick={() => setCurrentView('prontas')}
+                      className="px-3 py-2 bg-white border border-green-200 hover:bg-green-100 text-green-700 rounded-lg text-sm font-bold transition-colors shadow-sm"
+                    >
+                      Ver Peça
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -360,6 +386,35 @@ export const Dashboard: React.FC = () => {
                     onClick={() => setSelectedStage(stage)}
                   />
                 ))}
+              </div>
+
+              {/* Painel de Processamento Multi-Workflow */}
+              <div className="mt-8">
+                <WorkflowPanel
+                  workflows={allWorkflows}
+                  queue={queue}
+                  queueLength={queueLength}
+                  maxQueue={maxQueue}
+                  onRespondCheckpoint={respondToCheckpoint}
+                  onRemoveFromQueue={removeFromQueue}
+                  onDownloadDocx={(wfId) => {
+                    window.open(`/api/workflow/${wfId}/docx`, '_blank');
+                  }}
+                  onViewPeticao={() => {
+                    // Forçar recarregamento do Supabase antes de navegar
+                    db_peticoes.listar().then(prontas => {
+                      const aguardando = prontas.filter(p =>
+                        p.status === 'Aguardando Protocolo' || p.status === 'Protocolada'
+                      );
+                      const efetivamenteProntas = prontas.filter(p =>
+                        p.status === 'Aguardando Revisão' || p.status === 'Aprovada'
+                      );
+                      setPeticoesProntas(efetivamenteProntas);
+                      setPeticoesAguardando(aguardando);
+                    });
+                    setCurrentView('prontas');
+                  }}
+                />
               </div>
             </div>
           )}

@@ -58,6 +58,7 @@ export function usePeticoesProntas() {
       arquivos: [],
       status: r.status,
       dataConclusao: r.data_conclusao,
+      docxUrl: r.docx_url ?? null,
     }));
   }, []);
 

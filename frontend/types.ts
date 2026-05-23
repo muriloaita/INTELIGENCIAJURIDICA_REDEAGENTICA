@@ -19,7 +19,7 @@ export interface WorkflowStage {
   iconName: string;
 }
 
-export type SimulationStatus = 'idle' | 'running' | 'completed' | 'pendente';
+export type SimulationStatus = 'idle' | 'running' | 'completed' | 'pendente' | 'awaiting_input';
 
 export interface PrazoFormData {
   demanda: string;
@@ -55,7 +55,7 @@ export interface KnowledgeStats {
 }
 
 export interface WorkflowEvent {
-  type: 'phase_start' | 'phase_complete' | 'workflow_complete' | 'error';
+  type: 'phase_start' | 'phase_complete' | 'workflow_complete' | 'docx_ready' | 'checkpoint_required' | 'checkpoint_resolved' | 'error';
   phaseId?: number;
   name?: string;
   result?: string;
@@ -64,6 +64,9 @@ export interface WorkflowEvent {
   executionTime?: number;
   workflowId?: string;
   error?: string;
+  downloadUrl?: string;
+  filename?: string;
+  checkpointData?: CheckpointData;
 }
 
 export interface SearchResult {
@@ -97,6 +100,7 @@ export interface PeticaoPronta extends PrazoFormData {
   status: 'Aguardando Revisão' | 'Aprovada' | 'Aguardando Protocolo' | 'Protocolada';
   dataConclusao: string;
   tipoPeca: string;
+  docxUrl?: string;
 }
 
 export interface AgentConfig {
@@ -114,4 +118,54 @@ export interface WorkflowHistoryItem {
   autos: string;
   tipoPeticao: string;
   status: 'Concluído' | 'Pendente' | 'Cancelado';
+}
+
+// ── Tipos para Checkpoint Humano e Multi-Workflow ─────────────────
+
+export interface CheckpointItem {
+  item: string;
+  status: 'OK' | 'AUSENTE' | 'INCOMPLETO';
+  mensagem: string;
+}
+
+export interface CheckpointData {
+  items: CheckpointItem[];
+  pode_prosseguir: boolean;
+  motivo: string;
+}
+
+export interface WorkflowInstance {
+  id: string;
+  status: 'running' | 'awaiting_input' | 'completed' | 'error' | 'cancelled';
+  prazoData: {
+    demanda: string;
+    autos: string;
+    tipoPeticao: string;
+    observacao: string;
+  };
+  currentPhase: number | null;
+  completedPhases: number[];
+  checkpointData: CheckpointData | null;
+  docxUrl: string | null;
+  createdAt: string;
+}
+
+export interface QueueItem {
+  id: string;
+  prazoData: {
+    demanda: string;
+    autos: string;
+    tipoPeticao: string;
+    observacao: string;
+  };
+  createdAt: string;
+}
+
+export interface WorkflowStatusResponse {
+  workflows: WorkflowInstance[];
+  queue: QueueItem[];
+  queueLength: number;
+  maxQueue: number;
+  canEnqueue: boolean;
+  processing: string | null;
 }

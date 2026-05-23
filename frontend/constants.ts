@@ -69,18 +69,6 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
   },
   {
     id: 6,
-    title: "Memória Estendida e Eficiência de Processamento",
-    shortTitle: "Memória & Eficiência",
-    description: "Hub de Memória Contextual (MCP) para manter coerência em fluxos longos.",
-    agents: ["MCP"],
-    iconName: "Network",
-    features: [
-      { name: "Markdown Optimization", description: "Transforma dados em Markdown para economizar tokens e manter estrutura limpa." },
-      { name: "Extended Memory", description: "Hub central que armazena o histórico de decisões da cadeia agêntica." }
-    ]
-  },
-  {
-    id: 7,
     title: "Agente Revisor e Validação de Coerência",
     shortTitle: "Revisão & Validação",
     description: "Última camada de inteligência focada na crítica e refinamento técnico.",
@@ -92,7 +80,7 @@ export const WORKFLOW_STAGES: WorkflowStage[] = [
     ]
   },
   {
-    id: 8,
+    id: 7,
     title: "Módulo: Petições Prontas",
     shortTitle: "Petições Prontas",
     description: "Encerramento do fluxo garantindo responsabilidade profissional, segurança e disponibilização da peça final.",

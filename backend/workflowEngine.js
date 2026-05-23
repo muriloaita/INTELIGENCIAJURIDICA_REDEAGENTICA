@@ -29,11 +29,23 @@ export class WorkflowEngine {
    * @param {object} prazoData - Dados da demanda
    * @param {object} agentConfigs - Configurações customizadas por agente
    * @param {function} onEvent - Callback para emitir eventos SSE
+   * @param {string} [externalWorkflowId] - ID externo (do server) para manter sincronismo com SSE
    * @returns {Promise<string>} - workflowId
    */
-  async startWorkflow(prazoData, agentConfigs, onEvent) {
-    const workflowId = uuidv4();
-    this.activeWorkflows.set(workflowId, { status: 'running', cancel: false });
+  async startWorkflow(prazoData, agentConfigs, onEvent, externalWorkflowId = null) {
+    const workflowId = externalWorkflowId || uuidv4();
+    this.activeWorkflows.set(workflowId, {
+      status: 'running',       // 'running' | 'awaiting_input' | 'completed' | 'error' | 'cancelled'
+      cancel: false,
+      prazoData,
+      currentPhase: null,      // ID da fase em execução
+      completedPhases: [],     // IDs das fases concluídas
+      phaseResults: {},        // Resultados acumulados de cada fase
+      checkpointData: null,    // Dados do checkpoint quando pausado
+      docxUrl: null,           // URL do DOCX gerado
+      createdAt: new Date().toISOString(),
+      resumeResolve: null,     // Promise resolve para retomar após checkpoint
+    });
 
     const phases = [
       { id: 1, agent: new A1Coletor(), name: 'Coleta & Organização' },
@@ -73,11 +85,17 @@ export class WorkflowEngine {
 
     try {
       for (const phase of phases) {
+        const wf = this.activeWorkflows.get(workflowId);
+
         // Verificar cancelamento
-        if (this.activeWorkflows.get(workflowId)?.cancel) {
+        if (wf?.cancel) {
+          wf.status = 'cancelled';
           onEvent({ type: 'workflow_cancelled', workflowId });
           break;
         }
+
+        // Atualizar fase atual no estado do workflow
+        wf.currentPhase = phase.id;
 
         // Emitir início da fase
         onEvent({
@@ -99,8 +117,25 @@ export class WorkflowEngine {
               .filter(Boolean)
               .join(' ');
 
-            // Filtrar por categoria da base de conhecimento se o tipo selecionado é uma categoria indexada
-            const categoria = prazoData.tipoPeticao || null;
+            // Filtrar por categoria da base de conhecimento
+            // Mapear nomes legíveis para slugs da base (quando selecionam do dropdown fallback)
+            const LABEL_TO_SLUG = {
+              'MANIFESTAÇÃO DA PARTE': 'manifestacao',
+              'ESPECIFICAÇÃO DE PROVAS': 'geral',
+              'IMPUGNAÇÃO À CONTESTAÇÃO': 'impugnacao',
+              'QUESITOS': 'quesitos',
+              'CUMPRIMENTO DE INTIMAÇÃO': 'cumprimento_sentenca',
+              'AGRAVO DE INSTRUMENTO': 'agravo_instrumento',
+              'EMBARGOS DE DECLARAÇÃO': 'embargos_declaracao',
+              'RECURSO DE APELAÇÃO': 'recurso_apelacao',
+              'RECURSO INOMINADO': 'recurso_apelacao',
+              'OUTRAS': null,
+            };
+            const tipoPeticao = prazoData.tipoPeticao || '';
+            const categoria = LABEL_TO_SLUG[tipoPeticao] !== undefined
+              ? LABEL_TO_SLUG[tipoPeticao]
+              : tipoPeticao; // Se já é um slug da base, usa direto
+
             // Tentar busca filtrada primeiro (mais relevante), depois busca geral
             let ragResults = await this.ragSearch.search(query, {
               topK: 10,
@@ -135,8 +170,70 @@ export class WorkflowEngine {
           agentConfig
         );
 
-        // Acumular resultado
+        // Acumular resultado no contexto de execução e no estado do workflow
         accumulatedContext.phaseResults[phase.id] = result.result;
+        wf.phaseResults[phase.id] = result.result;
+
+        // ── Checkpoint Humano após Fase 3 (Gestão de Conhecimento) ──
+        // Lógica simplificada: só interromper se os dados de ENTRADA do usuário
+        // são insuficientes para redigir a peça. Se o usuário informou o nº
+        // do processo, a base de conhecimento tem tudo que precisa.
+        if (phase.id === 3) {
+          const hasTipoPeticao = !!(prazoData.tipoPeticao && prazoData.tipoPeticao.trim());
+          const hasDemanda = !!(prazoData.demanda && prazoData.demanda.trim());
+          const hasAutos = !!(prazoData.autos && prazoData.autos.trim());
+
+          // Só pausar se NÃO temos tipo de petição E NÃO temos descrição da demanda
+          // (se o usuário forneceu pelo menos um desses, o sistema consegue prosseguir)
+          const shouldPause = !hasTipoPeticao && !hasDemanda;
+
+          if (shouldPause) {
+            console.log('[WorkflowEngine] Dados insuficientes para redigir. Pausando para solicitar informações.');
+
+            const checkpointData = {
+              items: [
+                ...(!hasTipoPeticao ? [{ item: 'Tipo de Peça', status: 'AUSENTE', mensagem: 'Informe o tipo de petição a ser redigida (ex: Manifestação, Embargos, Recurso).' }] : []),
+                ...(!hasDemanda ? [{ item: 'Descrição da Demanda', status: 'AUSENTE', mensagem: 'Descreva brevemente o que deve ser argumentado na peça.' }] : []),
+                ...(!hasAutos ? [{ item: 'Número do Processo', status: 'INCOMPLETO', mensagem: 'Informar o número dos autos pode melhorar a qualidade da peça (opcional).' }] : []),
+              ],
+              pode_prosseguir: false,
+              motivo: 'Informe ao menos o tipo de peça ou a descrição da demanda para prosseguir.',
+            };
+
+            wf.status = 'awaiting_input';
+            wf.checkpointData = checkpointData;
+
+            onEvent({
+              type: 'checkpoint_required',
+              workflowId,
+              checkpointData,
+            });
+
+            // Aguardar resposta do usuário
+            await new Promise((resolve) => {
+              wf.resumeResolve = resolve;
+            });
+
+            // Verificar se foi cancelado enquanto aguardava
+            if (wf.cancel) {
+              wf.status = 'cancelled';
+              onEvent({ type: 'workflow_cancelled', workflowId });
+              return workflowId;
+            }
+
+            // Retomar
+            wf.status = 'running';
+            wf.checkpointData = null;
+
+            if (wf.phaseResults['user_checkpoint_response']) {
+              accumulatedContext.phaseResults['user_checkpoint_response'] = wf.phaseResults['user_checkpoint_response'];
+            }
+
+            onEvent({ type: 'checkpoint_resolved', workflowId });
+          } else {
+            console.log(`[WorkflowEngine] Dados suficientes (tipo=${hasTipoPeticao}, demanda=${hasDemanda}, autos=${hasAutos}). Prosseguindo sem interrupção.`);
+          }
+        }
 
         // Salvar no Supabase
         try {
@@ -172,20 +269,25 @@ export class WorkflowEngine {
           executionTime: result.executionTime,
           workflowId,
         });
+
+        // Marcar fase como concluída no estado do workflow
+        wf.completedPhases.push(phase.id);
       }
 
-      // Workflow concluído
-      this.activeWorkflows.set(workflowId, {
-        status: 'completed',
-        cancel: false,
-      });
-      onEvent({ type: 'workflow_complete', workflowId });
+      // Workflow concluído — atualizar estado preservando dados acumulados
+      const wfFinal = this.activeWorkflows.get(workflowId);
+      if (wfFinal && wfFinal.status !== 'cancelled') {
+        wfFinal.status = 'completed';
+        wfFinal.currentPhase = null;
+        onEvent({ type: 'workflow_complete', workflowId });
+      }
     } catch (error) {
       console.error('[WorkflowEngine] Erro no workflow:', error);
-      this.activeWorkflows.set(workflowId, {
-        status: 'error',
-        cancel: false,
-      });
+      const wfErr = this.activeWorkflows.get(workflowId);
+      if (wfErr) {
+        wfErr.status = 'error';
+        wfErr.currentPhase = null;
+      }
       onEvent({
         type: 'error',
         error: error.message,
@@ -204,6 +306,11 @@ export class WorkflowEngine {
     const wf = this.activeWorkflows.get(workflowId);
     if (wf) {
       wf.cancel = true;
+      // Se está aguardando input, resolver a Promise para desbloquear o loop
+      if (wf.resumeResolve) {
+        wf.resumeResolve();
+        wf.resumeResolve = null;
+      }
       console.log(`[WorkflowEngine] Workflow ${workflowId} marcado para cancelamento.`);
     }
   }
@@ -215,5 +322,130 @@ export class WorkflowEngine {
    */
   getWorkflowStatus(workflowId) {
     return this.activeWorkflows.get(workflowId) || null;
+  }
+
+  /**
+   * Faz o parse do bloco CHECKLIST_VALIDACAO_JSON do output do A2
+   * @param {string} text - Texto completo do output do agente
+   * @returns {object|null} Dados da checklist parseados ou null
+   */
+  parseChecklist(text) {
+    // Tentar vários padrões de extração (o LLM pode formatar de formas diferentes)
+    const patterns = [
+      /---CHECKLIST_VALIDACAO_JSON---([\s\S]*?)---FIM_CHECKLIST---/,
+      /```json\s*\n?([\s\S]*?)\n?```\s*---FIM_CHECKLIST---/,
+      /CHECKLIST_VALIDACAO_JSON[\s\-]*\n?([\s\S]*?)\n?[\s\-]*FIM_CHECKLIST/,
+      /```json\s*\n?(\{[\s\S]*?"pode_prosseguir"[\s\S]*?\})\n?```/,
+      /(\{[\s\S]*?"items"[\s\S]*?"pode_prosseguir"[\s\S]*?\})/,
+    ];
+
+    let jsonStr = null;
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        jsonStr = match[1].trim();
+        console.log(`[WorkflowEngine] Checklist encontrada com padrão: ${pattern.source.substring(0, 40)}...`);
+        break;
+      }
+    }
+
+    if (!jsonStr) {
+      console.warn('[WorkflowEngine] Nenhum bloco de checklist encontrado no output do A2.');
+      console.warn('[WorkflowEngine] Primeiros 500 chars do output:', text.substring(0, 500));
+      return null;
+    }
+
+    try {
+      // Limpar possíveis artefatos de markdown
+      jsonStr = jsonStr.replace(/^```json\s*\n?/, '').replace(/\n?```$/, '').trim();
+      
+      // Tentar parsear
+      const parsed = JSON.parse(jsonStr);
+      
+      // Normalizar pode_prosseguir (o LLM pode retornar string "true"/"false")
+      if (typeof parsed.pode_prosseguir === 'string') {
+        parsed.pode_prosseguir = parsed.pode_prosseguir.toLowerCase() === 'true';
+      }
+      
+      console.log(`[WorkflowEngine] Checklist parseada com sucesso. pode_prosseguir=${parsed.pode_prosseguir}`);
+      return parsed;
+    } catch (e) {
+      console.error('[WorkflowEngine] Erro ao parsear JSON da checklist:', e.message);
+      console.error('[WorkflowEngine] JSON tentado:', jsonStr.substring(0, 300));
+      return null;
+    }
+  }
+
+  /**
+   * Retorna termos de busca para verificar se um item da checklist foi encontrado na base de conhecimento
+   * @param {string} itemName - Nome do item em lowercase
+   * @returns {string[]} Lista de termos para buscar no output da Fase 3
+   */
+  getSearchTermsForItem(itemName) {
+    const termMap = {
+      'número do processo': ['processo', 'autos n', 'autos:', 'nº'],
+      'partes (autor/réu)': ['autor', 'réu', 'requerente', 'requerido', 'apelante', 'apelado', 'embargante', 'embargado', 'impetrante', 'impetrado', 'agravante', 'agravado'],
+      'tipo de peça': ['petição', 'peça', 'embargos', 'recurso', 'apelação', 'contestação', 'manifestação', 'agravo'],
+      'matéria jurídica': ['direito civil', 'direito penal', 'direito trabalhista', 'direito tributário', 'direito administrativo', 'consumerista', 'contratual', 'bancário', 'obrigacional', 'responsabilidade civil'],
+      'prazo fatal': ['prazo', 'intimação', 'publicação', 'dias úteis', 'dies a quo'],
+      'foro/vara': ['vara', 'foro', 'comarca', 'juízo', 'tribunal', 'seção', 'turma'],
+      'documentos de suporte': ['documento', 'prova', 'anexo', 'certidão', 'contrato', 'comprovante'],
+    };
+    return termMap[itemName] || [itemName];
+  }
+
+  /**
+   * Retoma um workflow que está aguardando input do usuário
+   * @param {string} workflowId - ID do workflow a ser retomado
+   * @param {object} userResponses - Respostas do usuário para o checkpoint
+   */
+  resumeWorkflow(workflowId, userResponses) {
+    const wf = this.activeWorkflows.get(workflowId);
+    if (!wf || wf.status !== 'awaiting_input') {
+      throw new Error('Workflow não encontrado ou não está aguardando input.');
+    }
+    // Injetar respostas do usuário no contexto acumulado do workflow
+    if (userResponses) {
+      wf.phaseResults['user_checkpoint_response'] = JSON.stringify(userResponses);
+    }
+    // Liberar a Promise que está bloqueando a execução do workflow
+    if (wf.resumeResolve) {
+      wf.resumeResolve();
+      wf.resumeResolve = null;
+    }
+  }
+
+  /**
+   * Retorna workflows filtrados por status
+   * @param {string} status - Status a filtrar ('running', 'awaiting_input', 'completed', 'error', 'cancelled')
+   * @returns {Array<object>} Lista de workflows com o status especificado
+   */
+  getWorkflowsByStatus(status) {
+    const results = [];
+    for (const [id, wf] of this.activeWorkflows) {
+      if (wf.status === status) results.push({ id, ...wf });
+    }
+    return results;
+  }
+
+  /**
+   * Retorna todos os workflows ativos com dados resumidos
+   * @returns {Array<object>} Lista de todos os workflows
+   */
+  getAllWorkflows() {
+    const results = [];
+    for (const [id, wf] of this.activeWorkflows) {
+      results.push({
+        id,
+        status: wf.status,
+        prazoData: wf.prazoData,
+        currentPhase: wf.currentPhase,
+        completedPhases: wf.completedPhases,
+        checkpointData: wf.checkpointData,
+        docxUrl: wf.docxUrl,
+        createdAt: wf.createdAt,
+      });
+    }
+    return results;
   }
 }

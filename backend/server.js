@@ -21,6 +21,8 @@ import { EmbeddingService } from './rag/embeddingService.js';
 import { VectorStore } from './rag/vectorStore.js';
 import { RagSearch } from './rag/ragSearch.js';
 import { processDocument, inferCategoria } from './rag/documentProcessor.js';
+import { generateDocx } from './docxGenerator.js';
+import { WorkflowQueue } from './workflowQueue.js';
 
 const app = express();
 app.use(express.json({limit: process?.env?.API_PAYLOAD_MAX_SIZE || "7mb"}));
@@ -160,6 +162,233 @@ if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
 } else {
   console.warn('[Server] SUPABASE_URL/SERVICE_KEY não configurados. Serviços de IA desativados.');
 }
+
+// ── Diretório para salvar DOCX em disco (sobrevive restart) ──
+const DOCX_OUTPUT_DIR = path.join(process.cwd(), 'output', 'docx');
+if (!fs.existsSync(DOCX_OUTPUT_DIR)) fs.mkdirSync(DOCX_OUTPUT_DIR, { recursive: true });
+
+// ── Helper: Broadcast SSE para listeners de um workflow ──
+function broadcastSSE(workflowId, eventPayload) {
+  const listeners = workflowListeners.get(workflowId);
+  if (!listeners || listeners.size === 0) return;
+  const eventData = `data: ${JSON.stringify({ ...eventPayload, workflowId })}\n\n`;
+  for (const listener of listeners) {
+    try { listener.write(eventData); } catch (e) { listeners.delete(listener); }
+  }
+}
+
+// ── Helper: Limpar SSE listeners após workflow terminar ──
+function cleanupSSE(workflowId) {
+  setTimeout(() => {
+    const ls = workflowListeners.get(workflowId);
+    if (ls) {
+      for (const l of ls) { try { l.end(); } catch (e) { /* ignore */ } }
+      workflowListeners.delete(workflowId);
+    }
+  }, 2000);
+}
+
+// ── Helper: Salvar petição pronta no Supabase ──
+async function savePetitionToSupabase(workflowId, prazoData, docxUrl) {
+  if (!supabase) return;
+  try {
+    const record = {
+      id: workflowId,  // UUID completo — compatível com a coluna uuid do Supabase
+      demanda: prazoData.demanda || '',
+      autos: prazoData.autos || '',
+      tipo_peticao: prazoData.tipoPeticao || '',
+      tipo_peca: prazoData.tipoPeticao || '',
+      observacao: prazoData.observacao || '',
+      status: 'Aguardando Revisão',
+      data_conclusao: new Date().toISOString(),
+    };
+    // Tentar com docx_url; se a coluna não existir, tenta sem
+    let { error } = await supabase.from('peticoes_prontas').upsert({ ...record, docx_url: docxUrl || null });
+    if (error && error.message?.includes('docx_url')) {
+      ({ error } = await supabase.from('peticoes_prontas').upsert(record));
+    }
+    if (error) throw error;
+    console.log(`[Server] Petição ${workflowId} salva no Supabase.`);
+  } catch (err) {
+    console.error('[Server] Erro ao salvar petição no Supabase:', err.message);
+  }
+}
+
+// ── Helper: Registrar no histórico de fluxos ──
+async function saveHistoryToSupabase(workflowId, prazoData, status) {
+  if (!supabase) return;
+  try {
+    await supabase.from('historico_fluxos').insert({
+      fluxo_codigo: `FLX-${workflowId.substring(0, 8)}`,
+      data: new Date().toISOString(),
+      demanda: prazoData.demanda || '',
+      autos: prazoData.autos || '',
+      tipo_peticao: prazoData.tipoPeticao || '',
+      status,
+    });
+    console.log(`[Server] Histórico FLX-${workflowId.substring(0, 8)} registrado (${status}).`);
+  } catch (err) {
+    console.error('[Server] Erro ao registrar histórico:', err.message);
+  }
+}
+
+// ── Mapa de tipos de petição para categorias da base de conhecimento ──
+const TIPO_TO_CATEGORIA = {
+  'MANIFESTAÇÃO DA PARTE': 'manifestacao',
+  'ESPECIFICAÇÃO DE PROVAS': 'geral',
+  'IMPUGNAÇÃO À CONTESTAÇÃO': 'impugnacao',
+  'QUESITOS': 'quesitos',
+  'CUMPRIMENTO DE INTIMAÇÃO': 'cumprimento_sentenca',
+  'AGRAVO DE INSTRUMENTO': 'agravo_instrumento',
+  'EMBARGOS DE DECLARAÇÃO': 'embargos_declaracao',
+  'RECURSO DE APELAÇÃO': 'recurso_apelacao',
+  'RECURSO INOMINADO': 'recurso_apelacao',
+};
+
+/**
+ * Indexa a petição gerada na base de conhecimento (RAG).
+ * Cada petição pronta retroalimenta o sistema para melhorar peças futuras.
+ */
+async function indexPetitionInKnowledgeBase(petitionText, prazoData, workflowId) {
+  if (!embeddingService || !vectorStore) {
+    console.warn('[RAG] Serviços RAG indisponíveis — petição não indexada.');
+    return;
+  }
+
+  try {
+    const tipoPeticao = prazoData.tipoPeticao || '';
+    const autos = prazoData.autos || 'sem_autos';
+    const categoria = TIPO_TO_CATEGORIA[tipoPeticao] || 'geral';
+    const documentoOrigem = `Peticao_Gerada_${autos.replace(/[^a-zA-Z0-9.-]/g, '_')}_${workflowId.substring(0, 8)}`;
+
+    // Dividir petição em chunks de ~1500 caracteres (respeitando parágrafos)
+    const paragraphs = petitionText.split(/\n{2,}/);
+    const chunks = [];
+    let currentChunk = '';
+    const CHUNK_SIZE = 1500;
+
+    for (const paragraph of paragraphs) {
+      if ((currentChunk + '\n\n' + paragraph).length > CHUNK_SIZE && currentChunk.length > 0) {
+        chunks.push(currentChunk.trim());
+        currentChunk = paragraph;
+      } else {
+        currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+      }
+    }
+    if (currentChunk.trim().length > 0) {
+      chunks.push(currentChunk.trim());
+    }
+
+    // Montar objetos de chunk com metadados
+    const chunkObjects = chunks.map((text, index) => ({
+      titulo: `${tipoPeticao} — Autos ${autos} (Chunk ${index + 1}/${chunks.length})`,
+      conteudo: text,
+      chunk_index: index,
+      total_chunks: chunks.length,
+      documento_origem: documentoOrigem,
+      categoria,
+      fonte: 'peticao_gerada',
+      metadata: {
+        tipo_peticao: tipoPeticao,
+        autos,
+        demanda: prazoData.demanda || '',
+        workflow_id: workflowId,
+        gerado_em: new Date().toISOString(),
+      },
+    }));
+
+    // Gerar embeddings
+    const texts = chunkObjects.map(c => c.conteudo);
+    const embeddings = await embeddingService.embedBatch(texts);
+
+    // Inserir no vector store
+    const result = await vectorStore.insertChunks(chunkObjects, embeddings);
+    console.log(`[RAG] Petição indexada: ${documentoOrigem} — ${result.inserted}/${chunks.length} chunks inseridos.`);
+
+    if (result.errors.length > 0) {
+      console.warn('[RAG] Erros na indexação:', result.errors);
+    }
+  } catch (err) {
+    console.error('[RAG] Erro ao indexar petição na base de conhecimento:', err.message);
+  }
+}
+
+/**
+ * Factory: cria event handler unificado para qualquer workflow (direto ou enfileirado).
+ * Lida com: DOCX generation, Supabase persistence, SSE broadcast, RAG indexing.
+ */
+function createWorkflowEventHandler(workflowId, prazoData) {
+  // Garantir que temos SSE listeners para este workflow
+  if (!workflowListeners.has(workflowId)) {
+    workflowListeners.set(workflowId, new Set());
+  }
+
+  return (event) => {
+    // 1) Quando Fase 6 (Redação) completa → gerar DOCX + indexar na base de conhecimento
+    if (event.type === 'phase_complete' && event.phaseId === 6 && event.result) {
+      // 1a) Gerar DOCX
+      generateDocx(event.result, {
+        autos: prazoData.autos,
+        tipoPeticao: prazoData.tipoPeticao,
+        demanda: prazoData.demanda,
+      }).then((buffer) => {
+        const safeAutos = (prazoData.autos || 'sem_autos').replace(/[^a-zA-Z0-9.\-]/g, '_');
+        const filename = `Peticao_${safeAutos}.docx`;
+
+        // Salvar em disco (sobrevive restart)
+        const diskPath = path.join(DOCX_OUTPUT_DIR, `${workflowId}.docx`);
+        fs.writeFileSync(diskPath, buffer);
+
+        // Salvar em memória (acesso rápido)
+        generatedDocxFiles.set(workflowId, { buffer, filename });
+
+        // Atualizar estado do workflow
+        const wfState = workflowEngine.getWorkflowStatus(workflowId);
+        if (wfState) wfState.docxUrl = `/api/workflow/${workflowId}/docx`;
+
+        console.log(`[Server] DOCX gerado: ${filename} (${buffer.length} bytes) → disco + memória`);
+
+        // Broadcast SSE: DOCX pronto
+        broadcastSSE(workflowId, {
+          type: 'docx_ready',
+          filename,
+          downloadUrl: `/api/workflow/${workflowId}/docx`,
+        });
+      }).catch((err) => {
+        console.error('[Server] Erro ao gerar DOCX:', err.message);
+      });
+
+      // 1b) Indexar petição na base de conhecimento (em paralelo, não bloqueia)
+      indexPetitionInKnowledgeBase(event.result, prazoData, workflowId);
+    }
+
+    // 2) Broadcast do evento para SSE listeners
+    broadcastSSE(workflowId, event);
+
+    // 3) Quando workflow termina → salvar no Supabase + cleanup
+    if (event.type === 'workflow_complete') {
+      const docxUrl = `/api/workflow/${workflowId}/docx`;
+      savePetitionToSupabase(workflowId, prazoData, docxUrl);
+      saveHistoryToSupabase(workflowId, prazoData, 'Concluído');
+    }
+
+    if (event.type === 'error') {
+      saveHistoryToSupabase(workflowId, prazoData, 'Erro');
+    }
+
+    if (event.type === 'workflow_cancelled') {
+      saveHistoryToSupabase(workflowId, prazoData, 'Cancelado');
+    }
+
+    // 4) Cleanup SSE + liberar fila nos eventos terminais
+    if (['workflow_complete', 'workflow_cancelled', 'error'].includes(event.type)) {
+      cleanupSSE(workflowId);
+    }
+  };
+}
+
+// Instância do gerenciador de fila de workflows (com factory de handlers)
+const workflowQueue = workflowEngine ? new WorkflowQueue(workflowEngine, createWorkflowEventHandler) : null;
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -346,12 +575,15 @@ app.post('/api-proxy', async (req, res) => {
   }
 });
 
+// Mapa de arquivos DOCX gerados (workflowId → { buffer, filename })
+const generatedDocxFiles = new Map();
+
 // ========================================
 // ROTAS DE WORKFLOW (Agentes de IA)
 // ========================================
 
-// POST /api/workflow/start — Inicia workflow em background
-app.post('/api/workflow/start', async (req, res) => {
+// POST /api/workflow/start — Inicia workflow em background (com suporte a fila e upload de arquivos)
+app.post('/api/workflow/start', upload.array('files', 20), async (req, res) => {
   if (!workflowEngine) {
     return res.status(503).json({ error: 'Serviços de IA não inicializados. Verifique as variáveis SUPABASE.' });
   }
@@ -361,6 +593,69 @@ app.post('/api/workflow/start', async (req, res) => {
 
     if (!demanda && !tipoPeticao) {
       return res.status(400).json({ error: 'Campos "demanda" ou "tipoPeticao" são obrigatórios.' });
+    }
+
+    // ── Processar arquivos anexados (extrair texto + indexar na KB) ──
+    let documentosAnexos = '';
+    const files = req.files || [];
+    if (files.length > 0) {
+      console.log(`[Server] Processando ${files.length} arquivo(s) anexado(s) ao workflow...`);
+      const extractedTexts = [];
+
+      for (const file of files) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const renamedPath = file.path + ext;
+        fs.renameSync(file.path, renamedPath);
+
+        try {
+          const chunks = await processDocument(renamedPath, null, 'workflow_upload');
+          if (chunks && chunks.length > 0) {
+            // Acumular texto extraído para injetar no contexto do workflow
+            const fileText = chunks.map(c => c.content).join('\n');
+            extractedTexts.push(`── Arquivo: ${file.originalname} ──\n${fileText}`);
+
+            // Indexar na base de conhecimento (em paralelo, não bloqueia)
+            if (embeddingService && vectorStore) {
+              try {
+                const texts = chunks.map(c => c.content);
+                const embeddings = await embeddingService.embedBatch(texts);
+
+                const chunkObjects = chunks.map((c, i) => ({
+                  titulo: `${file.originalname} (Chunk ${i + 1}/${chunks.length})`,
+                  conteudo: c.content,
+                  chunk_index: i,
+                  total_chunks: chunks.length,
+                  documento_origem: file.originalname,
+                  categoria: c.metadata?.categoria || inferCategoria(file.originalname, fileText),
+                  fonte: 'workflow_upload',
+                  metadata: {
+                    ...c.metadata,
+                    autos: autos || '',
+                    demanda: demanda || '',
+                  },
+                }));
+
+                await vectorStore.insertChunks(chunkObjects, embeddings);
+                console.log(`[Server] Arquivo "${file.originalname}" indexado: ${chunks.length} chunks.`);
+              } catch (indexErr) {
+                console.error(`[Server] Erro ao indexar ${file.originalname}:`, indexErr.message);
+              }
+            }
+          } else {
+            console.warn(`[Server] Sem texto extraído de ${file.originalname}`);
+          }
+        } catch (fileErr) {
+          console.error(`[Server] Erro ao processar ${file.originalname}:`, fileErr.message);
+        }
+
+        // Limpar arquivo temporário
+        try { fs.unlinkSync(renamedPath); } catch {}
+      }
+
+      documentosAnexos = extractedTexts.join('\n\n');
+      if (documentosAnexos) {
+        console.log(`[Server] Texto total extraído dos anexos: ${documentosAnexos.length} caracteres.`);
+      }
     }
 
     // Carregar agentConfigs do Supabase (se existir tabela agent_configs)
@@ -378,47 +673,50 @@ app.post('/api/workflow/start', async (req, res) => {
       console.warn('[Server] Tabela agent_configs não encontrada, usando defaults.');
     }
 
-    const workflowId = uuidv4();
-    workflowListeners.set(workflowId, new Set());
-
-    // Iniciar workflow em background (não aguardar)
-    workflowEngine.startWorkflow(
-      { demanda, autos, tipoPeticao, observacao },
-      agentConfigs,
-      (event) => {
-        // Broadcast para todos os SSE listeners deste workflow
-        const listeners = workflowListeners.get(workflowId);
-        if (listeners) {
-          const eventData = `data: ${JSON.stringify({ ...event, workflowId })}\n\n`;
-          for (const listener of listeners) {
-            try {
-              listener.write(eventData);
-            } catch (e) {
-              listeners.delete(listener);
-            }
-          }
-        }
-
-        // Limpar listeners quando workflow terminar
-        if (['workflow_complete', 'workflow_cancelled', 'error'].includes(event.type)) {
-          setTimeout(() => {
-            const ls = workflowListeners.get(workflowId);
-            if (ls) {
-              for (const l of ls) {
-                try { l.end(); } catch (e) { /* ignore */ }
-              }
-              workflowListeners.delete(workflowId);
-            }
-          }, 2000);
-        }
+    // Verificar se já há um workflow em execução — se sim, enfileirar
+    const runningWorkflows = workflowEngine.getWorkflowsByStatus('running');
+    if (runningWorkflows.length > 0 && workflowQueue) {
+      try {
+        const queueItem = workflowQueue.enqueue(
+          { demanda, autos, tipoPeticao, observacao, documentosAnexos },
+          agentConfigs
+        );
+        return res.json({
+          queued: true,
+          queueId: queueItem.id,
+          position: workflowQueue.queue.length,
+          message: `Workflow enfileirado na posição ${workflowQueue.queue.length}. Será iniciado automaticamente.`,
+        });
+      } catch (queueErr) {
+        return res.status(429).json({ error: queueErr.message });
       }
-    );
+    }
+
+    const workflowId = uuidv4();
+    const prazoData = { demanda, autos, tipoPeticao, observacao, documentosAnexos };
+
+    // Usar handler centralizado (DOCX + Supabase + SSE)
+    const eventHandler = createWorkflowEventHandler(workflowId, prazoData);
+
+    // Iniciar workflow em background
+    workflowEngine.startWorkflow(prazoData, agentConfigs, eventHandler, workflowId);
 
     res.json({ workflowId, status: 'started' });
   } catch (error) {
     console.error('[Server] Erro ao iniciar workflow:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// GET /api/workflow/status — Dashboard: lista todos os workflows e status da fila
+// IMPORTANTE: esta rota DEVE vir ANTES das rotas com :id para não ser capturada como parâmetro
+app.get('/api/workflow/status', (req, res) => {
+  if (!workflowEngine) {
+    return res.status(503).json({ error: 'Serviços não inicializados' });
+  }
+  const workflows = workflowEngine.getAllWorkflows();
+  const queueStatus = workflowQueue ? workflowQueue.getStatus() : { queue: [], queueLength: 0 };
+  res.json({ workflows, ...queueStatus });
 });
 
 // GET /api/workflow/:id/events — SSE para acompanhar progresso do workflow
@@ -459,6 +757,57 @@ app.post('/api/workflow/:id/stop', (req, res) => {
   const workflowId = req.params.id;
   workflowEngine.stopWorkflow(workflowId);
   res.json({ message: `Workflow ${workflowId} marcado para cancelamento.` });
+});
+
+// POST /api/workflow/:id/respond — Retoma workflow pausado em checkpoint humano
+app.post('/api/workflow/:id/respond', (req, res) => {
+  if (!workflowEngine) {
+    return res.status(503).json({ error: 'Serviços não inicializados.' });
+  }
+
+  try {
+    const { responses } = req.body;
+    workflowEngine.resumeWorkflow(req.params.id, responses);
+    res.json({ message: 'Workflow retomado com sucesso.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// DELETE /api/workflow/queue/:id — Remove item da fila de workflows
+app.delete('/api/workflow/queue/:id', (req, res) => {
+  if (!workflowQueue) {
+    return res.status(503).json({ error: 'Fila não inicializada.' });
+  }
+  workflowQueue.dequeue(req.params.id);
+  res.json({ message: 'Removido da fila.' });
+});
+
+// GET /api/workflow/:id/docx — Download da petição em Word (.docx)
+app.get('/api/workflow/:id/docx', (req, res) => {
+  const workflowId = req.params.id;
+
+  // 1) Tentar memória (rápido)
+  const docxData = generatedDocxFiles.get(workflowId);
+  if (docxData) {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${docxData.filename}"`);
+    res.setHeader('Content-Length', docxData.buffer.length);
+    return res.send(docxData.buffer);
+  }
+
+  // 2) Tentar disco (sobrevive restart)
+  const diskPath = path.join(DOCX_OUTPUT_DIR, `${workflowId}.docx`);
+  if (fs.existsSync(diskPath)) {
+    const wf = workflowEngine?.getWorkflowStatus(workflowId);
+    const safeAutos = (wf?.prazoData?.autos || 'peticao').replace(/[^a-zA-Z0-9.\-]/g, '_');
+    const filename = `Peticao_${safeAutos}.docx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.sendFile(diskPath);
+  }
+
+  return res.status(404).json({ error: 'DOCX ainda não gerado ou workflow não encontrado.' });
 });
 
 // ========================================

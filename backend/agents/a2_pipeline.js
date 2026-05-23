@@ -69,7 +69,36 @@ FORMATO DE SAÍDA:
 3. ESTRATÉGIA PROCESSUAL
 4. TESES (principal + subsidiárias)
 5. PLANO DE EXECUÇÃO DETALHADO
-6. CHECKLIST DE REQUISITOS`;
+6. CHECKLIST DE REQUISITOS
+
+7. CHECKLIST DE VALIDAÇÃO (OBRIGATÓRIO — gere SEMPRE no final do output):
+Você DEVE gerar um bloco JSON de validação no FINAL da sua resposta, delimitado exatamente pelos marcadores abaixo.
+Verifique cada um dos 7 itens obrigatórios e classifique como "OK", "AUSENTE" ou "INCOMPLETO".
+Se QUALQUER item essencial (Número do Processo, Partes, Tipo de Peça) estiver AUSENTE, defina "pode_prosseguir" como false.
+
+O formato EXATO deve ser:
+
+---CHECKLIST_VALIDACAO_JSON---
+{
+  "items": [
+    { "item": "Número do Processo", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição do que foi encontrado ou do que falta" },
+    { "item": "Partes (Autor/Réu)", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" },
+    { "item": "Tipo de Peça", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" },
+    { "item": "Matéria Jurídica", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" },
+    { "item": "Prazo Fatal", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" },
+    { "item": "Foro/Vara", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" },
+    { "item": "Documentos de Suporte", "status": "OK|AUSENTE|INCOMPLETO", "mensagem": "Descrição" }
+  ],
+  "pode_prosseguir": true ou false,
+  "motivo": "Explicação do motivo se não pode prosseguir, ou 'Todos os itens validados' se OK"
+}
+---FIM_CHECKLIST---
+
+REGRAS DA CHECKLIST:
+- SEMPRE gere este bloco, mesmo que todas as informações estejam presentes
+- Se Número do Processo, Partes ou Tipo de Peça estiverem AUSENTES → pode_prosseguir = false
+- Se apenas itens secundários estiverem ausentes → pode_prosseguir = true (com ressalvas)
+- O JSON deve ser válido e parseável`;
   }
 
   buildUserPrompt(context) {
