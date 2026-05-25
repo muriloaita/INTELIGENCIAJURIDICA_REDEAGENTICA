@@ -60,10 +60,21 @@ export async function extractTextFromImage(filePath) {
 export async function extractTextFromPDF(filePath) {
   try {
     const dataBuffer = fs.readFileSync(filePath);
-    // pdf-parse v2: usar new PDFParse({data, verbosity}) + load() + getText()
+    // pdf-parse v2: new PDFParse({data, verbosity}) + load() + getText()
     const parser = new PDFParse({ data: new Uint8Array(dataBuffer), verbosity: 0 });
     await parser.load();
-    const digitalText = (await parser.getText() || '').trim();
+    const textResult = await parser.getText();
+
+    // getText() retorna {pages: [{text: string}]} — extrair texto de todas as páginas
+    let digitalText = '';
+    if (typeof textResult === 'string') {
+      digitalText = textResult.trim();
+    } else if (textResult && textResult.pages) {
+      digitalText = textResult.pages.map(p => p.text || '').join('\n').trim();
+    } else if (textResult && typeof textResult.text === 'string') {
+      digitalText = textResult.text.trim();
+    }
+
     if (digitalText.length >= LIMITE_CHARS) return digitalText;
     // Pouco texto digital → tentar OCR como fallback
     const tess = await findTesseract();
