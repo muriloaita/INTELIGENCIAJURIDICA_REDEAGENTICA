@@ -170,6 +170,14 @@ export async function extractTextFromPDF(filePath) {
     }
 
     let finalText = cleanText(result.text || '');
+
+    // Limitar texto a 100K caracteres para evitar OOM no processamento posterior
+    const MAX_TEXT_LENGTH = 100000;
+    if (finalText.length > MAX_TEXT_LENGTH) {
+      console.log(`[PDF]   Texto truncado: ${finalText.length} → ${MAX_TEXT_LENGTH} caracteres (limite de segurança)`);
+      finalText = finalText.substring(0, MAX_TEXT_LENGTH);
+    }
+
     console.log(`[PDF] ${fileName}: ${result.pages} páginas → ${finalText.length} caracteres extraídos ✓`);
 
     // Se pouco texto digital → OCR fallback
