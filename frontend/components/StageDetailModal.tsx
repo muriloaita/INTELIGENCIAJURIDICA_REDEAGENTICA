@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { WorkflowStage, AgentConfig } from '../types';
+import { WorkflowStage, AgentConfig, PhaseResultData } from '../types';
 import { Icon } from './Icons';
 import { AGENT_COLORS } from '../constants';
 
 interface StageDetailModalProps {
   stage: WorkflowStage | null;
-  result?: string;
+  result?: PhaseResultData;
   agentConfigs: Record<string, AgentConfig>;
   onClose: () => void;
 }
@@ -15,45 +15,59 @@ export const StageDetailModal: React.FC<StageDetailModalProps> = ({ stage, resul
 
   if (!stage) return null;
 
-  // Generate dynamic config text based on user inputs in ConfigView
+  const hasResult = result && result.result;
+  const tokensIn = result?.tokensInput;
+  const tokensOut = result?.tokensOutput;
+  const execTime = result?.executionTime;
+  const completedAt = result?.completedAt;
+
+  // Formatar tempo de execução
+  const formatTime = (ms?: number) => {
+    if (!ms) return '—';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+
+  // Formatar tokens
+  const formatTokens = (n?: number) => {
+    if (!n) return '—';
+    return n.toLocaleString('pt-BR');
+  };
+
+  // Gerar log real baseado nos dados
   const agentConfigsText = stage.agents.map(agentId => {
     const conf = agentConfigs[agentId];
     if (!conf || (!conf.mcpConfig && !conf.ragConfig && !conf.customInstructions && !conf.cotConfig && !conf.driveLink)) {
-      return `[${agentId}] Utilizando parâmetros padrão do sistema.`;
+      return `[${agentId}] Parâmetros padrão do sistema.`;
     }
     return `[${agentId}] CONFIGURAÇÕES APLICADAS:\n` +
            (conf.driveLink ? `  > Drive Link: ${conf.driveLink}\n` : '') +
            (conf.mcpConfig ? `  > MCP: ${conf.mcpConfig}\n` : '') +
            (conf.ragConfig ? `  > RAG: ${conf.ragConfig}\n` : '') +
-           (conf.cotConfig ? `  > CoT (Chain of Thought): ${conf.cotConfig}\n` : '') +
-           (conf.customInstructions ? `  > Prompt: "${conf.customInstructions.substring(0, 50)}..."\n` : '');
+           (conf.cotConfig ? `  > CoT: ${conf.cotConfig}\n` : '') +
+           (conf.customInstructions ? `  > Prompt: "${conf.customInstructions.substring(0, 80)}..."\n` : '');
   }).join('\n');
 
-  // Mock full details text incorporating the agent configs
-  const fullDetailsText = `[LOG DE EXECUÇÃO COMPLETA - FASE ${stage.id}: ${stage.shortTitle.toUpperCase()}]\n\n` +
-    `Timestamp: ${new Date().toISOString()}\n` +
-    `Agentes Envolvidos: ${stage.agents.join(', ')}\n` +
-    `Status: Concluído com Sucesso\n\n` +
-    `==================================================\n` +
-    `INJEÇÃO DE CONTEXTO E COMPORTAMENTO (MCP/RAG/CoT):\n` +
-    `${agentConfigsText}\n` +
-    `==================================================\n\n` +
-    `DADOS BRUTOS COLETADOS E PROCESSADOS:\n` +
-    `- Extração de metadados via OCR concluída com 99.8% de precisão.\n` +
-    `- Identificação de entidades nomeadas (NER) finalizada.\n` +
-    `- Validação cruzada de prazos com o sistema do tribunal: OK.\n\n` +
-    `PROCESSAMENTO COGNITIVO E ANÁLISE:\n` +
-    `- Análise de sentimento da peça contrária: Agressivo/Acusatório.\n` +
-    `- Classificação de risco da demanda: Moderado a Alto.\n` +
-    `- Busca jurisprudencial: 45 acórdãos analisados, 3 selecionados por alta similaridade fática.\n` +
-    `- Aplicação do Protocolo Steel Man: Argumentos contrários mapeados e refutados.\n\n` +
-    `RESULTADO DA GERAÇÃO E MÉTRICAS:\n` +
-    `- Tokens utilizados no prompt: 4,520.\n` +
-    `- Tokens gerados na resposta: 1,250.\n` +
-    `- Tempo de inferência total: 2.4s.\n` +
-    `- Validação de coerência (CoT): Passou em todos os 12 critérios lógicos estabelecidos.\n` +
-    `==================================================\n\n` +
-    `RESUMO EXECUTIVO:\n${result || 'Nenhum resultado simplificado disponível para esta fase no momento.'}`;
+  const fullDetailsText = hasResult
+    ? `[LOG DE EXECUÇÃO — FASE ${stage.id}: ${stage.shortTitle.toUpperCase()}]\n\n` +
+      `Conclusão: ${completedAt ? new Date(completedAt).toLocaleString('pt-BR') : '—'}\n` +
+      `Agentes: ${stage.agents.join(', ')}\n` +
+      `Status: Concluído\n\n` +
+      `══════════════════════════════════════════\n` +
+      `MÉTRICAS REAIS DE EXECUÇÃO:\n` +
+      `  Tokens de entrada:  ${formatTokens(tokensIn)}\n` +
+      `  Tokens de saída:    ${formatTokens(tokensOut)}\n` +
+      `  Tokens total:       ${formatTokens((tokensIn || 0) + (tokensOut || 0))}\n` +
+      `  Tempo de execução:  ${formatTime(execTime)}\n` +
+      `══════════════════════════════════════════\n\n` +
+      `CONFIGURAÇÃO DOS AGENTES:\n${agentConfigsText}\n\n` +
+      `══════════════════════════════════════════\n` +
+      `RESULTADO COMPLETO DA FASE:\n${result?.result || '—'}`
+    : `[FASE ${stage.id}: ${stage.shortTitle.toUpperCase()}]\n\n` +
+      `Status: Aguardando execução\n` +
+      `Agentes: ${stage.agents.join(', ')}\n\n` +
+      `CONFIGURAÇÃO:\n${agentConfigsText}\n\n` +
+      `Nenhum resultado disponível. Esta fase ainda não foi executada neste fluxo.`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -87,7 +101,7 @@ export const StageDetailModal: React.FC<StageDetailModalProps> = ({ stage, resul
             <div className="bg-gray-900 rounded-xl p-5 overflow-x-auto">
               <div className="flex items-center gap-2 mb-4 text-brand-400 border-b border-gray-700 pb-2">
                 <Icon name="Terminal" size={18} />
-                <h3 className="text-sm font-bold uppercase tracking-wider">Logs do Sistema & Configurações</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wider">Logs Reais do Sistema</h3>
               </div>
               <pre className="text-green-400 font-mono text-sm whitespace-pre-wrap leading-relaxed">
                 {fullDetailsText}
@@ -95,17 +109,47 @@ export const StageDetailModal: React.FC<StageDetailModalProps> = ({ stage, resul
             </div>
           ) : (
             <>
-              {/* Informações Obtidas (Resultados) */}
-              {result && (
+              {/* Métricas Reais */}
+              {hasResult && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-blue-600 font-semibold mb-1">Tokens Entrada</div>
+                    <div className="text-lg font-bold text-blue-800">{formatTokens(tokensIn)}</div>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-purple-600 font-semibold mb-1">Tokens Saída</div>
+                    <div className="text-lg font-bold text-purple-800">{formatTokens(tokensOut)}</div>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-green-600 font-semibold mb-1">Tempo</div>
+                    <div className="text-lg font-bold text-green-800">{formatTime(execTime)}</div>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-amber-600 font-semibold mb-1">Concluído em</div>
+                    <div className="text-sm font-bold text-amber-800">
+                      {completedAt ? new Date(completedAt).toLocaleTimeString('pt-BR') : '—'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Resultado Real */}
+              {hasResult ? (
                 <div className="bg-brand-50 border border-brand-200 rounded-xl p-5 relative overflow-hidden shadow-sm">
                   <div className="absolute top-0 left-0 w-1 h-full bg-brand-500"></div>
                   <h3 className="text-sm font-bold text-brand-700 uppercase tracking-wider mb-2 flex items-center gap-2">
                     <Icon name="CheckCircle" size={16} />
-                    Informações Obtidas
+                    Resultado Real da Fase
                   </h3>
-                  <p className="text-gray-800 leading-relaxed whitespace-pre-line font-medium">
-                    {result}
+                  <p className="text-gray-800 leading-relaxed whitespace-pre-line font-medium text-sm">
+                    {result?.result}
                   </p>
+                </div>
+              ) : (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 text-center">
+                  <Icon name="Clock" size={32} className="mx-auto text-gray-300 mb-2" />
+                  <p className="text-gray-500 font-medium">Fase ainda não executada neste fluxo.</p>
+                  <p className="text-gray-400 text-sm mt-1">Os dados reais aparecerão aqui após a execução.</p>
                 </div>
               )}
 

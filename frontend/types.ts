@@ -29,8 +29,16 @@ export interface PrazoFormData {
   arquivos: File[];
 }
 
+export interface PhaseResultData {
+  result: string;
+  tokensInput?: number;
+  tokensOutput?: number;
+  executionTime?: number;
+  completedAt?: string;
+}
+
 export interface PhaseResults {
-  [key: number]: string;
+  [key: number]: PhaseResultData;
 }
 
 export type AppView = 'overview' | 'templates' | 'prazos' | 'prontas' | 'protocolo' | 'config' | 'historico' | 'knowledge';

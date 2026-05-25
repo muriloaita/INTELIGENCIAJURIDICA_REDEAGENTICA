@@ -118,12 +118,16 @@ export function useWorkflow() {
             case 'phase_complete':
               if (data.phaseId) {
                 setCompletedPhases(prev => [...prev, data.phaseId!]);
-                if (data.result) {
-                  setPhaseResults(prev => ({
-                    ...prev,
-                    [data.phaseId!]: data.result!,
-                  }));
-                }
+                setPhaseResults(prev => ({
+                  ...prev,
+                  [data.phaseId!]: {
+                    result: data.result || '',
+                    tokensInput: data.tokensInput,
+                    tokensOutput: data.tokensOutput,
+                    executionTime: data.executionTime,
+                    completedAt: new Date().toISOString(),
+                  },
+                }));
                 // Avançar para a próxima fase visualmente
                 setActivePhaseId(data.phaseId + 1);
               }
