@@ -141,7 +141,7 @@ export async function extractTextFromPDF(filePath) {
     // Executar worker em processo filho com memória limitada a 1GB
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
-      ['--max-old-space-size=1024', '--input-type=module', PDF_WORKER_PATH, filePath],
+      ['--max-old-space-size=1024', PDF_WORKER_PATH, filePath],
       { timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
     );
 
