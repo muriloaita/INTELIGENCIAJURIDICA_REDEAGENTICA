@@ -50,6 +50,7 @@ export function usePeticoesProntas() {
     if (error) { console.error('[Supabase] listar petições:', error); return []; }
     return (data ?? []).map((r: any) => ({
       id: r.id,
+      codigo: r.codigo ?? null,
       demanda: r.demanda,
       autos: r.autos,
       tipoPeticao: r.tipo_peticao ?? '',

@@ -12,7 +12,7 @@ import os from 'os';
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const pdfParseModule = require('pdf-parse');
-const PDFParse = pdfParseModule.PDFParse || pdfParseModule.default || pdfParseModule;
+const PDFParse = pdfParseModule.PDFParse;
 const mammoth = require('mammoth');
 
 const TESSERACT_LANG = 'por';
@@ -60,9 +60,12 @@ export async function extractTextFromImage(filePath) {
 export async function extractTextFromPDF(filePath) {
   try {
     const dataBuffer = fs.readFileSync(filePath);
-    const pdfData = await PDFParse(dataBuffer);
-    const digitalText = (pdfData.text || '').trim();
+    // pdf-parse v2: usar new PDFParse({data, verbosity}) + load() + getText()
+    const parser = new PDFParse({ data: new Uint8Array(dataBuffer), verbosity: 0 });
+    await parser.load();
+    const digitalText = (await parser.getText() || '').trim();
     if (digitalText.length >= LIMITE_CHARS) return digitalText;
+    // Pouco texto digital → tentar OCR como fallback
     const tess = await findTesseract();
     if (!tess) return digitalText;
     try {

@@ -188,10 +188,28 @@ function cleanupSSE(workflowId) {
   }, 2000);
 }
 
+// ── Helper: Gerar próximo código sequencial (ID00001, ID00002...) ──
+async function getNextPetitionCode() {
+  if (!supabase) return 'ID00001';
+  try {
+    const { count, error } = await supabase
+      .from('peticoes_prontas')
+      .select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    const nextNum = (count || 0) + 1;
+    return `ID${String(nextNum).padStart(5, '0')}`;
+  } catch (err) {
+    console.warn('[Server] Erro ao gerar código sequencial:', err.message);
+    // Fallback: timestamp-based
+    return `ID${Date.now().toString().slice(-5)}`;
+  }
+}
+
 // ── Helper: Salvar petição pronta no Supabase ──
 async function savePetitionToSupabase(workflowId, prazoData, docxUrl) {
-  if (!supabase) return;
+  if (!supabase) return null;
   try {
+    const codigo = await getNextPetitionCode();
     const record = {
       id: workflowId,  // UUID completo — compatível com a coluna uuid do Supabase
       demanda: prazoData.demanda || '',
@@ -202,15 +220,51 @@ async function savePetitionToSupabase(workflowId, prazoData, docxUrl) {
       status: 'Aguardando Revisão',
       data_conclusao: new Date().toISOString(),
     };
-    // Tentar com docx_url; se a coluna não existir, tenta sem
-    let { error } = await supabase.from('peticoes_prontas').upsert({ ...record, docx_url: docxUrl || null });
+
+    // Tentar com codigo + docx_url; fallback progressivo se colunas não existirem
+    let { error } = await supabase.from('peticoes_prontas').upsert({
+      ...record,
+      codigo,
+      docx_url: docxUrl || null,
+    });
+
+    // Se 'codigo' não existe como coluna, tentar sem
+    if (error && error.message?.includes('codigo')) {
+      ({ error } = await supabase.from('peticoes_prontas').upsert({
+        ...record,
+        docx_url: docxUrl || null,
+      }));
+    }
+
+    // Se 'docx_url' não existe como coluna, tentar sem
     if (error && error.message?.includes('docx_url')) {
       ({ error } = await supabase.from('peticoes_prontas').upsert(record));
     }
+
     if (error) throw error;
-    console.log(`[Server] Petição ${workflowId} salva no Supabase.`);
+    console.log(`[Server] Petição ${codigo}-${workflowId.substring(0, 8)} salva no Supabase.`);
+
+    // Renomear DOCX em disco com o código sequencial
+    const oldPath = path.join(DOCX_OUTPUT_DIR, `${workflowId}.docx`);
+    const safeAutos = (prazoData.autos || 'peticao').replace(/[^a-zA-Z0-9.\-]/g, '_');
+    const newFilename = `${codigo}_Peticao_${safeAutos}.docx`;
+    const newPath = path.join(DOCX_OUTPUT_DIR, newFilename);
+    if (fs.existsSync(oldPath)) {
+      fs.copyFileSync(oldPath, newPath);  // Copia com novo nome (mantém original por UUID)
+      console.log(`[Server] DOCX renomeado: ${newFilename}`);
+    }
+
+    // Atualizar memória com novo filename
+    const docxData = generatedDocxFiles.get(workflowId);
+    if (docxData) {
+      docxData.filename = newFilename;
+      docxData.codigo = codigo;
+    }
+
+    return codigo;
   } catch (err) {
     console.error('[Server] Erro ao salvar petição no Supabase:', err.message);
+    return null;
   }
 }
 

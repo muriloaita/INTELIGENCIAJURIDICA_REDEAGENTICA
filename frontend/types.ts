@@ -97,6 +97,7 @@ export interface TemplateFormData {
 
 export interface PeticaoPronta extends PrazoFormData {
   id: string;
+  codigo?: string; // ID sequencial: ID00001, ID00002...
   status: 'Aguardando Revisão' | 'Aprovada' | 'Aguardando Protocolo' | 'Protocolada';
   dataConclusao: string;
   tipoPeca: string;

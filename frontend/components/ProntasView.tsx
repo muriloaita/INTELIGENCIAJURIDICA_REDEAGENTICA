@@ -36,6 +36,11 @@ export const ProntasView: React.FC<ProntasViewProps> = ({ peticoes, onRevisar, o
 
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-3 mb-1">
+                  {peticao.codigo && (
+                    <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-gray-900 text-white border border-gray-700 tracking-wider">
+                      {peticao.codigo}
+                    </span>
+                  )}
                   <h3 className="text-lg font-bold text-gray-900">{peticao.tipoPeca}</h3>
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border
                     ${peticao.status === 'Aguardando Revisão' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
