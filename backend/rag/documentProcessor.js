@@ -15,12 +15,8 @@ import { createRequire } from 'module';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
-import { PDFDocument } from 'pdf-lib';
-
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
-const pdfParseModule = require('pdf-parse');
-const PDFParse = pdfParseModule.PDFParse;
 const mammoth = require('mammoth');
 
 const TESSERACT_LANG = 'por';
@@ -32,14 +28,7 @@ const TESSERACT_PATHS = [
   path.join(os.homedir(), 'AppData', 'Local', 'Tesseract-OCR', 'tesseract.exe'),
 ];
 
-// ── Tamanho dinâmico do chunk baseado no total de páginas ──
-function getChunkSize(totalPages) {
-  if (totalPages <= 5) return totalPages;       // PDFs pequenos: processar tudo de uma vez
-  if (totalPages <= 20) return 5;               // Médios: lotes de 5 páginas
-  if (totalPages <= 50) return 10;              // Grandes: lotes de 10
-  if (totalPages <= 100) return 15;             // Muito grandes: lotes de 15
-  return 20;                                    // Gigantes: lotes de 20
-}
+
 
 // ══════════════════════════════════════════════════════════════
 //  LIMPEZA DE TEXTO — Mojibake, ruído de digitalização, UTF-8
@@ -132,121 +121,73 @@ export async function extractTextFromImage(filePath) {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  EXTRAÇÃO DE TEXTO — PDF (com chunking inteligente via pdf-lib)
+//  EXTRAÇÃO DE TEXTO — PDF (via processo filho isolado)
+//  Cada PDF roda em subprocess separado → memória 100% liberada
 // ══════════════════════════════════════════════════════════════
 
-/**
- * Extrai texto de um chunk de páginas (Buffer de PDF parcial)
- */
-async function extractTextFromPDFBuffer(pdfBuffer) {
-  const parser = new PDFParse({ data: new Uint8Array(pdfBuffer), verbosity: 0 });
-  await parser.load();
-  const textResult = await parser.getText();
-  try { parser.destroy(); } catch {}
-
-  if (typeof textResult === 'string') return textResult;
-  if (textResult && textResult.pages) {
-    return textResult.pages.map(p => p.text || '').join('\n');
-  }
-  if (textResult && typeof textResult.text === 'string') return textResult.text;
-  return '';
-}
+const PDF_WORKER_PATH = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '_pdfExtractWorker.js');
 
 /**
- * Extrai texto de um PDF usando divisão inteligente por páginas.
- * PDFs grandes são fragmentados em chunks menores via pdf-lib.
+ * Extrai texto de um PDF em processo filho isolado.
+ * Previne acúmulo de memória do pdfjs-dist entre múltiplos PDFs.
  */
 export async function extractTextFromPDF(filePath) {
   const fileName = path.basename(filePath);
   try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const fileSizeMB = fileBuffer.length / (1024 * 1024);
+    const stats = fs.statSync(filePath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    console.log(`[PDF] ${fileName}: ${fileSizeMB.toFixed(1)}MB → processando em worker isolado...`);
 
-    // ── Carregar documento com pdf-lib para contar páginas ──
-    let srcDoc;
+    // Executar worker em processo filho com memória limitada a 1GB
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['--max-old-space-size=1024', '--input-type=module', PDF_WORKER_PATH, filePath],
+      { timeout: 180000, maxBuffer: 50 * 1024 * 1024 }
+    );
+
+    if (stderr) console.warn(`[PDF]   Worker stderr: ${stderr.trim()}`);
+
+    // Parsear resultado JSON do worker
+    let result;
     try {
-      srcDoc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
-    } catch (loadErr) {
-      console.warn(`[PDF] Erro ao carregar ${fileName}: ${loadErr.message.substring(0, 100)}`);
+      result = JSON.parse(stdout.trim());
+    } catch {
+      console.error(`[PDF]   Worker output inválido para ${fileName}`);
+      return '';
+    }
+
+    if (result.error) {
+      console.warn(`[PDF]   Worker erro: ${result.error}`);
       // Fallback: tentar OCR direto
       const tess = await findTesseract();
       if (tess) {
         try {
-          const { stdout } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
-          return cleanText(stdout);
+          const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
+          return cleanText(ocrOut);
         } catch {}
       }
       return '';
     }
 
-    const totalPages = srcDoc.getPageCount();
-    const chunkSize = getChunkSize(totalPages);
+    let finalText = cleanText(result.text || '');
+    console.log(`[PDF] ${fileName}: ${result.pages} páginas → ${finalText.length} caracteres extraídos ✓`);
 
-    console.log(`[PDF] ${fileName}: ${totalPages} páginas, ${fileSizeMB.toFixed(1)}MB → chunks de ${chunkSize} páginas`);
-
-    // ── Processar em chunks ──
-    const allPageTexts = [];
-    let blankCount = 0;
-
-    for (let startPage = 0; startPage < totalPages; startPage += chunkSize) {
-      const endPage = Math.min(startPage + chunkSize, totalPages);
-      const chunkLabel = `[págs ${startPage + 1}-${endPage}/${totalPages}]`;
-
-      try {
-        // Criar um PDF parcial com apenas as páginas deste chunk
-        const chunkDoc = await PDFDocument.create();
-        const pageIndices = Array.from({ length: endPage - startPage }, (_, i) => startPage + i);
-        const copiedPages = await chunkDoc.copyPages(srcDoc, pageIndices);
-        copiedPages.forEach(page => chunkDoc.addPage(page));
-        const chunkBuffer = await chunkDoc.save();
-
-        // Extrair texto do chunk
-        const chunkRawText = await extractTextFromPDFBuffer(Buffer.from(chunkBuffer));
-
-        // Verificar cada "página" no texto extraído
-        // (pdf-parse retorna texto contínuo, dividimos por quebras duplas como heurística)
-        const pageTexts = chunkRawText.split(/\n{2,}/);
-        for (let i = 0; i < pageTexts.length; i++) {
-          const pageText = pageTexts[i];
-          if (isPageBlank(pageText)) {
-            blankCount++;
-            continue; // Ignorar páginas em branco
-          }
-          allPageTexts.push(pageText);
-        }
-
-        console.log(`[PDF]   ${chunkLabel} ✓ ${allPageTexts.length} blocos extraídos`);
-      } catch (chunkErr) {
-        console.warn(`[PDF]   ${chunkLabel} ✗ Erro: ${chunkErr.message.substring(0, 80)}`);
-        // Tentar OCR para este chunk como fallback
-        // (não implementado por chunk — continuamos com os demais)
-      }
-    }
-
-    if (blankCount > 0) {
-      console.log(`[PDF]   ${blankCount} página(s) em branco ignorada(s)`);
-    }
-
-    const rawText = allPageTexts.join('\n\n');
-    let finalText = cleanText(rawText);
-
-    // Se pouco texto digital → tentar OCR como fallback (inteiro)
+    // Se pouco texto digital → OCR fallback
     if (finalText.length < LIMITE_CHARS) {
-      console.log(`[PDF]   Pouco texto digital (${finalText.length} chars). Tentando OCR...`);
+      console.log(`[PDF]   Pouco texto (${finalText.length} chars). Tentando OCR...`);
       const tess = await findTesseract();
       if (tess) {
         try {
-          const { stdout } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
-          const ocrText = cleanText(stdout);
+          const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
+          const ocrText = cleanText(ocrOut);
           if (ocrText.length > finalText.length) finalText = ocrText;
         } catch {}
       }
     }
 
-    console.log(`[PDF] ${fileName}: extração completa → ${finalText.length} caracteres úteis`);
     return finalText;
   } catch (err) {
-    console.error(`[PDF] Erro fatal em ${fileName}: ${err.message}`);
+    console.error(`[PDF] Erro em ${fileName}: ${err.message}`);
     return '';
   }
 }
