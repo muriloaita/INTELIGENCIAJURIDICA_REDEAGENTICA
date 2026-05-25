@@ -649,7 +649,7 @@ app.post('/api/workflow/start', upload.array('files', 20), async (req, res) => {
       return res.status(400).json({ error: 'Campos "demanda" ou "tipoPeticao" são obrigatórios.' });
     }
 
-    // ── Processar arquivos anexados (extrair texto + indexar na KB) ──
+    // ── Processar arquivos anexados (extrair texto para o contexto) ──
     let documentosAnexos = '';
     const files = req.files || [];
     if (files.length > 0) {
@@ -667,38 +667,7 @@ app.post('/api/workflow/start', upload.array('files', 20), async (req, res) => {
             // Acumular texto extraído para injetar no contexto do workflow
             const fileText = chunks.map(c => c.content).join('\n');
             extractedTexts.push(`── Arquivo: ${file.originalname} ──\n${fileText}`);
-
-            // Indexar na base de conhecimento (em lotes de 5 para evitar OOM)
-            if (embeddingService && vectorStore) {
-              try {
-                const BATCH_SIZE = 5;
-                for (let b = 0; b < chunks.length; b += BATCH_SIZE) {
-                  const batchChunks = chunks.slice(b, b + BATCH_SIZE);
-                  const batchTexts = batchChunks.map(c => c.content);
-                  const batchEmbeddings = await embeddingService.embedBatch(batchTexts);
-
-                  const chunkObjects = batchChunks.map((c, i) => ({
-                    titulo: `${file.originalname} (Chunk ${b + i + 1}/${chunks.length})`,
-                    conteudo: c.content,
-                    chunk_index: b + i,
-                    total_chunks: chunks.length,
-                    documento_origem: file.originalname,
-                    categoria: c.metadata?.categoria || inferCategoria(file.originalname, fileText.substring(0, 2000)),
-                    fonte: 'workflow_upload',
-                    metadata: {
-                      ...c.metadata,
-                      autos: autos || '',
-                      demanda: demanda || '',
-                    },
-                  }));
-
-                  await vectorStore.insertChunks(chunkObjects, batchEmbeddings);
-                }
-                console.log(`[Server] Arquivo "${file.originalname}" indexado: ${chunks.length} chunks.`);
-              } catch (indexErr) {
-                console.error(`[Server] Erro ao indexar ${file.originalname}:`, indexErr.message);
-              }
-            }
+            console.log(`[Server] Texto extraído de "${file.originalname}": ${fileText.length} chars, ${chunks.length} chunks.`);
           } else {
             console.warn(`[Server] Sem texto extraído de ${file.originalname}`);
           }
