@@ -62,7 +62,7 @@ app.use('/api-proxy', proxyLimiter);
 
 
 
-const upload = multer({ dest: path.join(process.cwd(), 'uploads') });
+const upload = multer({ dest: path.join(process.cwd(), 'uploads'), limits: { fileSize: 100 * 1024 * 1024 } });
 
 // Map de listeners SSE para workflows ativos
 const workflowListeners = new Map(); // workflowId -> Set<res>
@@ -668,28 +668,32 @@ app.post('/api/workflow/start', upload.array('files', 20), async (req, res) => {
             const fileText = chunks.map(c => c.content).join('\n');
             extractedTexts.push(`── Arquivo: ${file.originalname} ──\n${fileText}`);
 
-            // Indexar na base de conhecimento (em paralelo, não bloqueia)
+            // Indexar na base de conhecimento (em lotes de 5 para evitar OOM)
             if (embeddingService && vectorStore) {
               try {
-                const texts = chunks.map(c => c.content);
-                const embeddings = await embeddingService.embedBatch(texts);
+                const BATCH_SIZE = 5;
+                for (let b = 0; b < chunks.length; b += BATCH_SIZE) {
+                  const batchChunks = chunks.slice(b, b + BATCH_SIZE);
+                  const batchTexts = batchChunks.map(c => c.content);
+                  const batchEmbeddings = await embeddingService.embedBatch(batchTexts);
 
-                const chunkObjects = chunks.map((c, i) => ({
-                  titulo: `${file.originalname} (Chunk ${i + 1}/${chunks.length})`,
-                  conteudo: c.content,
-                  chunk_index: i,
-                  total_chunks: chunks.length,
-                  documento_origem: file.originalname,
-                  categoria: c.metadata?.categoria || inferCategoria(file.originalname, fileText),
-                  fonte: 'workflow_upload',
-                  metadata: {
-                    ...c.metadata,
-                    autos: autos || '',
-                    demanda: demanda || '',
-                  },
-                }));
+                  const chunkObjects = batchChunks.map((c, i) => ({
+                    titulo: `${file.originalname} (Chunk ${b + i + 1}/${chunks.length})`,
+                    conteudo: c.content,
+                    chunk_index: b + i,
+                    total_chunks: chunks.length,
+                    documento_origem: file.originalname,
+                    categoria: c.metadata?.categoria || inferCategoria(file.originalname, fileText.substring(0, 2000)),
+                    fonte: 'workflow_upload',
+                    metadata: {
+                      ...c.metadata,
+                      autos: autos || '',
+                      demanda: demanda || '',
+                    },
+                  }));
 
-                await vectorStore.insertChunks(chunkObjects, embeddings);
+                  await vectorStore.insertChunks(chunkObjects, batchEmbeddings);
+                }
                 console.log(`[Server] Arquivo "${file.originalname}" indexado: ${chunks.length} chunks.`);
               } catch (indexErr) {
                 console.error(`[Server] Erro ao indexar ${file.originalname}:`, indexErr.message);
@@ -707,8 +711,14 @@ app.post('/api/workflow/start', upload.array('files', 20), async (req, res) => {
       }
 
       documentosAnexos = extractedTexts.join('\n\n');
+      // Limitar documentosAnexos a 30K chars para contexto da IA (evitar prompt gigante)
+      const MAX_CONTEXT = 30000;
+      if (documentosAnexos.length > MAX_CONTEXT) {
+        console.log(`[Server] documentosAnexos truncado: ${documentosAnexos.length} → ${MAX_CONTEXT} chars`);
+        documentosAnexos = documentosAnexos.substring(0, MAX_CONTEXT);
+      }
       if (documentosAnexos) {
-        console.log(`[Server] Texto total extraído dos anexos: ${documentosAnexos.length} caracteres.`);
+        console.log(`[Server] Texto total dos anexos: ${documentosAnexos.length} caracteres.`);
       }
     }
 
