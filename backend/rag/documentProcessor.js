@@ -59,11 +59,30 @@ export async function extractTextFromImage(filePath) {
 
 export async function extractTextFromPDF(filePath) {
   try {
+    // Verificar tamanho do arquivo — limitar a 50MB para evitar estouro de memória
+    const stats = fs.statSync(filePath);
+    const MAX_PDF_SIZE = 50 * 1024 * 1024; // 50MB
+    if (stats.size > MAX_PDF_SIZE) {
+      console.warn(`[PDF] Arquivo muito grande (${(stats.size / 1024 / 1024).toFixed(1)}MB > 50MB): ${path.basename(filePath)}`);
+      // Tentar OCR direto para PDFs grandes
+      const tess = await findTesseract();
+      if (tess) {
+        try {
+          const { stdout } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
+          return stdout.trim();
+        } catch {}
+      }
+      return '';
+    }
+
     const dataBuffer = fs.readFileSync(filePath);
     // pdf-parse v2: new PDFParse({data, verbosity}) + load() + getText()
     const parser = new PDFParse({ data: new Uint8Array(dataBuffer), verbosity: 0 });
     await parser.load();
     const textResult = await parser.getText();
+
+    // Liberar memória do parser
+    try { parser.destroy(); } catch {}
 
     // getText() retorna {pages: [{text: string}]} — extrair texto de todas as páginas
     let digitalText = '';

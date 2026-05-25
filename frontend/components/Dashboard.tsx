@@ -424,7 +424,8 @@ export const Dashboard: React.FC = () => {
           {currentView === 'prazos' && (
             <PrazosView 
               onNovoPrazo={handleStartClick} 
-              activePrazo={simStatus === 'running' ? prazoData : null} 
+              allWorkflows={allWorkflows}
+              historico={historico}
             />
           )}
           
