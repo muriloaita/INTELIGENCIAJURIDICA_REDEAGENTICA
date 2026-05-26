@@ -174,23 +174,28 @@ export class WorkflowEngine {
         accumulatedContext.phaseResults[phase.id] = result.result;
         wf.phaseResults[phase.id] = result.result;
 
-        // ── Checkpoint Humano após Fase 3 (Gestão de Conhecimento) ──
-        // Lógica simplificada: só interromper se os dados de ENTRADA do usuário
-        // são insuficientes para redigir a peça. Se o usuário informou o nº
-        // do processo, a base de conhecimento tem tudo que precisa.
-        if (phase.id === 3) {
+        // ── Checkpoint Humano após Fase 2 (Pipeline) e Fase 3 (Gestão de Conhecimento) ──
+        // Interromper o fluxo caso a IA identifique que faltam informações cruciais
+        // ou se existirem dúvidas/esclarecimentos necessários para alta assertividade.
+        let shouldPause = false;
+        let checkpointData = null;
+
+        if (phase.id === 2 || phase.id === 3) {
           const hasTipoPeticao = !!(prazoData.tipoPeticao && prazoData.tipoPeticao.trim());
           const hasDemanda = !!(prazoData.demanda && prazoData.demanda.trim());
           const hasAutos = !!(prazoData.autos && prazoData.autos.trim());
 
-          // Só pausar se NÃO temos tipo de petição E NÃO temos descrição da demanda
-          // (se o usuário forneceu pelo menos um desses, o sistema consegue prosseguir)
-          const shouldPause = !hasTipoPeticao && !hasDemanda;
+          // Verifica checklist da fase atual (A2 gera CHECKLIST_VALIDACAO_JSON, A3 agora também pode gerar)
+          const parsedChecklist = this.parseChecklist(result.result);
 
-          if (shouldPause) {
-            console.log('[WorkflowEngine] Dados insuficientes para redigir. Pausando para solicitar informações.');
-
-            const checkpointData = {
+          if (parsedChecklist && parsedChecklist.pode_prosseguir === false) {
+            shouldPause = true;
+            checkpointData = parsedChecklist;
+            console.log(`[WorkflowEngine] Pausa solicitada pela IA na fase ${phase.id} via checklist.`);
+          } else if (phase.id === 3 && !hasTipoPeticao && !hasDemanda) {
+            // Fallback: segurança extra para garantir o mínimo
+            shouldPause = true;
+            checkpointData = {
               items: [
                 ...(!hasTipoPeticao ? [{ item: 'Tipo de Peça', status: 'AUSENTE', mensagem: 'Informe o tipo de petição a ser redigida (ex: Manifestação, Embargos, Recurso).' }] : []),
                 ...(!hasDemanda ? [{ item: 'Descrição da Demanda', status: 'AUSENTE', mensagem: 'Descreva brevemente o que deve ser argumentado na peça.' }] : []),
@@ -199,6 +204,10 @@ export class WorkflowEngine {
               pode_prosseguir: false,
               motivo: 'Informe ao menos o tipo de peça ou a descrição da demanda para prosseguir.',
             };
+            console.log('[WorkflowEngine] Dados insuficientes para redigir (fallback manual). Pausando para solicitar informações.');
+          }
+
+          if (shouldPause && checkpointData) {
 
             wf.status = 'awaiting_input';
             wf.checkpointData = checkpointData;
@@ -231,7 +240,7 @@ export class WorkflowEngine {
 
             onEvent({ type: 'checkpoint_resolved', workflowId });
           } else {
-            console.log(`[WorkflowEngine] Dados suficientes (tipo=${hasTipoPeticao}, demanda=${hasDemanda}, autos=${hasAutos}). Prosseguindo sem interrupção.`);
+            console.log(`[WorkflowEngine] Dados suficientes. Prosseguindo sem interrupção.`);
           }
         }
 
@@ -350,7 +359,7 @@ export class WorkflowEngine {
     }
 
     if (!jsonStr) {
-      console.warn('[WorkflowEngine] Nenhum bloco de checklist encontrado no output do A2.');
+      console.warn('[WorkflowEngine] Nenhum bloco de checklist encontrado no output.');
       console.warn('[WorkflowEngine] Primeiros 500 chars do output:', text.substring(0, 500));
       return null;
     }

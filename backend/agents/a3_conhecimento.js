@@ -59,7 +59,29 @@ FORMATO DE SAÍDA:
 3. LEGISLAÇÃO APLICÁVEL (artigos específicos)
 4. DOUTRINA DE REFERÊNCIA
 5. SÍNTESE: Mapa de fundamentação (argumentos ↔ fontes)
-6. ALERTAS (entendimentos contrários, riscos jurisprudenciais)`;
+6. ALERTAS (entendimentos contrários, riscos jurisprudenciais)
+
+7. CHECKLIST DE VALIDAÇÃO (OBRIGATÓRIO — gere SEMPRE no final do output):
+Você DEVE gerar um bloco JSON de validação no FINAL da sua resposta.
+Verifique se possui TODAS as informações cruciais (fatos, documentos ou esclarecimentos) para formular argumentos assertivos e de alto nível.
+Se faltar algo essencial que o impeça de ser altamente assertivo, defina "pode_prosseguir" como false e crie os itens indicando o que falta.
+
+O formato EXATO deve ser:
+
+---CHECKLIST_VALIDACAO_JSON---
+{
+  "items": [
+    { "item": "Nome do item ou pergunta", "status": "AUSENTE|INCOMPLETO", "mensagem": "Descrição da dúvida ou da informação faltante essencial" }
+  ],
+  "pode_prosseguir": true ou false,
+  "motivo": "Explicação do motivo se não pode prosseguir, ou 'Todos os itens validados' se OK"
+}
+---FIM_CHECKLIST---
+
+REGRAS DA CHECKLIST:
+- SEMPRE gere este bloco, mesmo que não haja dúvidas.
+- Se "pode_prosseguir" for true, "items" pode ser uma lista vazia.
+- Se precisar de esclarecimentos do usuário ou de dados fáticos que não estão na base e nem no prompt para formular uma tese forte, coloque "pode_prosseguir": false.`;
   }
 
   buildUserPrompt(context) {
