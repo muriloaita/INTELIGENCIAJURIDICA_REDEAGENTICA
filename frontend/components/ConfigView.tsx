@@ -6,6 +6,7 @@ import { AGENT_COLORS } from '../constants';
 interface ConfigViewProps {
   configs: Record<string, AgentConfig>;
   onSaveConfig: (agentId: string, config: AgentConfig) => void;
+  onDeleteConfig: (agentId: string) => void;
 }
 
 const AGENTS_LIST = [
@@ -18,7 +19,7 @@ const AGENTS_LIST = [
   { id: 'A7', name: 'Revisor (CoT)', role: 'Validação de coerência e crítica' },
 ];
 
-export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig }) => {
+export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig, onDeleteConfig }) => {
   const [selectedAgent, setSelectedAgent] = useState(AGENTS_LIST[0].id);
   const [formData, setFormData] = useState<AgentConfig>({
     mcpConfig: '',
@@ -58,9 +59,17 @@ export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig })
   };
 
   const handleSave = () => {
-    onSaveConfig(selectedAgent, formData);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 3000);
+    if (window.confirm('Tem certeza de que deseja salvar as configurações deste agente?')) {
+      onSaveConfig(selectedAgent, formData);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
+    }
+  };
+
+  const handleDelete = () => {
+    if (window.confirm('Tem certeza de que deseja apagar as configurações deste agente? Isso irá reverter para os padrões do sistema.')) {
+      onDeleteConfig(selectedAgent);
+    }
   };
 
   const activeAgentDetails = AGENTS_LIST.find(a => a.id === selectedAgent);
@@ -112,17 +121,27 @@ export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig })
                 <p className="text-xs text-gray-500 font-mono">ID: {selectedAgent} | {activeAgentDetails?.role}</p>
               </div>
             </div>
-            <button 
-              onClick={handleSave}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all shadow-sm
-                ${isSaved 
-                  ? 'bg-green-600 hover:bg-green-700 text-white' 
-                  : 'bg-brand-600 hover:bg-brand-700 text-white'
-                }`}
-            >
-              <Icon name={isSaved ? "Check" : "Save"} size={18} />
-              {isSaved ? "Salvo!" : "Salvar Configuração"}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDelete}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold transition-all shadow-sm bg-red-100 hover:bg-red-200 text-red-700 border border-red-200"
+                title="Apagar Configuração"
+              >
+                <Icon name="Trash2" size={18} />
+                Apagar
+              </button>
+              <button
+                onClick={handleSave}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all shadow-sm
+                  ${isSaved
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-brand-600 hover:bg-brand-700 text-white'
+                  }`}
+              >
+                <Icon name={isSaved ? "Check" : "Save"} size={18} />
+                {isSaved ? "Salvo!" : "Salvar Configuração"}
+              </button>
+            </div>
           </div>
 
           <div className="p-6 overflow-y-auto custom-scrollbar space-y-6 flex-1">

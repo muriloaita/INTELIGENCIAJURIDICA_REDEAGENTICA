@@ -110,6 +110,13 @@ export const Dashboard: React.FC = () => {
     await db_agentes.salvar(agentId, config);
   };
 
+  const handleDeleteAgentConfig = async (agentId: string) => {
+    const newConfigs = { ...agentConfigs };
+    delete newConfigs[agentId];
+    setAgentConfigs(newConfigs);
+    await db_agentes.remover(agentId);
+  };
+
   // ── Handlers de Petições ───────────────────────────────────────
   const handleRevisar = async (id: string) => {
     setPeticoesProntas(prev => prev.map(p => p.id === id ? { ...p, status: 'Aprovada' } : p));
@@ -456,6 +463,7 @@ export const Dashboard: React.FC = () => {
             <ConfigView 
               configs={agentConfigs} 
               onSaveConfig={handleSaveAgentConfig} 
+              onDeleteConfig={handleDeleteAgentConfig}
             />
           )}
 

@@ -159,5 +159,10 @@ export function useAgentConfigs() {
     if (error) console.error('[Supabase] salvar agent_config:', error);
   }, []);
 
-  return { listar, salvar };
+  const remover = useCallback(async (agentId: string): Promise<void> => {
+    const { error } = await supabase.from('agent_configs').delete().eq('agent_id', agentId);
+    if (error) console.error('[Supabase] remover agent_config:', error);
+  }, []);
+
+  return { listar, salvar, remover };
 }
