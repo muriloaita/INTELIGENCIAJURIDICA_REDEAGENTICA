@@ -66,11 +66,12 @@ CHECKLIST DE REVISÃO:
    □ Dialeticidade (impugnação específica dos fundamentos)
    □ Regularidade formal
 
-5. REVISÃO DE RISCO (integração com A5):
-   □ Os argumentos do Steel Man foram abordados na peça?
-   □ As superações estão incorporadas adequadamente?
-   □ Os pontos vulneráveis foram blindados?
-   □ Há argumentos de antecipação de objeções?
+5. REVISÃO DE RISCO (integração com A5 - PROTOCOLO STEEL MAN - EXTREMAMENTE CRÍTICO):
+   □ Os argumentos adversários do Steel Man foram explicitamente abordados e rebatidos na peça de forma natural?
+   □ As superações lógicas e jurídicas (Counter-Steel Man) desenvolvidas no A5 estão incorporadas adequadamente no texto do A6?
+   □ Os pontos vulneráveis mapeados foram proativamente blindados com argumentação e jurisprudência?
+   □ A peça antecipa as prováveis objeções da parte contrária (ou do juízo) e as esvazia antes mesmo de serem suscitadas?
+   *ATENÇÃO:* Se a resposta for "Não" para qualquer item desta seção, a revisão deve apontar severas falhas, exigir correção imediata e refletir isso em uma nota menor. O cumprimento da Gestão de Risco é o diferencial do nosso sistema.
 
 SELFIE CRITIQUE:
 Após concluir a revisão, questione sua PRÓPRIA análise:
@@ -111,7 +112,7 @@ FORMATO DE SAÍDA:
     prompt += `\nINSTRUÇÕES:
 1. Aplique o Chain of Thought (CoT) para validar CADA argumento principal
 2. Execute o checklist de revisão completo
-3. Verifique se as superações do Steel Man foram incorporadas
+3. VERIFICAÇÃO CRÍTICA (STEEL MAN): Analise minuciosamente se a peça do A6 incorporou as refutações e superações lógicas elaboradas na Fase 5. Se o redator ignorou o Steel Man, penalize a peça severamente.
 4. Aplique Selfie Critique à sua própria revisão
 5. Se necessário, apresente a peça com as correções já aplicadas
 6. Atribua uma nota final de 0 a 10 com justificativa detalhada`;

@@ -38,6 +38,11 @@ PROIBIÇÕES ABSOLUTAS (violar qualquer uma = FALHA TOTAL):
 - NÃO inclua marcadores de metadados, cabeçalhos de fase ou referências ao pipeline de IA
 - NÃO inclua comentários sobre a qualidade da peça ou sugestões de melhoria
 
+OBRIGAÇÕES ARGUMENTATIVAS (APLICAÇÃO DO PROTOCOLO STEEL MAN):
+- Você DEVE incorporar de forma fluida as defesas proativas e as superações lógicas fornecidas na Análise de Contrapontos e Blindagem Argumentativa.
+- A peça já deve nascer blindada contra os ataques mapeados. Antecipe os possíveis argumentos da parte contrária (ou do juízo) e já os enfrente na fundamentação de forma natural (ex: "Ainda que se argumente que X, é imperioso notar que Y...").
+- A força da petição reside na sua capacidade de esvaziar os contra-argumentos adversários mais fortes antes mesmo que sejam levantados.
+
 O QUE VOCÊ DEVE PRODUZIR:
 Uma peça jurídica processual completa, pronta para protocolo, que um advogado
 assinaria e protocolaria hoje no sistema do tribunal, sem nenhuma alteração.
@@ -211,7 +216,7 @@ ATENÇÃO: Sua resposta deve conter EXCLUSIVAMENTE o texto da petição, do ende
     if (fase2) prompt += `[ESTRATÉGIA E PLANO]\n${fase2}\n\n`;
     if (fase3) prompt += `[FUNDAMENTAÇÃO JURÍDICA, JURISPRUDÊNCIA E LEGISLAÇÃO]\n${fase3}\n\n`;
     if (fase4) prompt += `[SÍNTESE FÁTICA E JURÍDICA]\n${fase4}\n\n`;
-    if (fase5) prompt += `[ANÁLISE DE CONTRAPONTOS E BLINDAGEM ARGUMENTATIVA]\n${fase5}\n\n`;
+    if (fase5) prompt += `[ANÁLISE DE CONTRAPONTOS E BLINDAGEM ARGUMENTATIVA (STEEL MAN - OBRIGATÓRIO APLICAR)]\n${fase5}\n\n`;
 
     prompt += `═══════════════════════════════════════════════════════
 
