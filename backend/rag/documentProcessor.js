@@ -16,6 +16,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
 import { fromPath } from 'pdf2pic';
+import { v4 as uuidv4 } from 'uuid';
+import { PDFDocument } from 'pdf-lib';
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const mammoth = require('mammoth');
@@ -126,47 +128,69 @@ export async function extractTextFromImage(filePath) {
 async function performOcrOnPdf(filePath) {
   const tess = await findTesseract();
   if (!tess) return '';
+
+  let directOcrText = '';
+  let directOcrSuccess = false;
+
   try {
     // Attempt direct PDF reading first (works if compiled with poppler/leptonica)
     const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
-    return cleanText(ocrOut);
+    directOcrText = cleanText(ocrOut);
+    if (directOcrText.length > LIMITE_CHARS) {
+        directOcrSuccess = true;
+    }
   } catch (err) {
-    if (err.message && err.message.includes("Pdf reading is not supported")) {
-      // Fallback: convert PDF to image and OCR
-      try {
-        const options = {
-          density: DPI_SCAN,
-          saveFilename: "ocr_temp",
-          savePath: os.tmpdir(),
-          format: "png",
-          width: 2480,
-          height: 3508
-        };
-        const storeAsImage = fromPath(filePath, options);
-        let combinedText = '';
+      console.warn(`[OCR] Tesseract direct PDF read failed: ${err.message}. Triggering Ghostscript fallback.`);
+  }
 
-        // Convert first 3 pages as an approximation for speed vs accuracy, or just page 1
-        // (Full document conversion could be very slow)
-        const maxPagesToOcr = 3;
-        for (let i = 1; i <= maxPagesToOcr; i++) {
-          try {
-            const result = await storeAsImage(i);
-            const imgPath = result.path;
-            const { stdout: pageOcr } = await execFileAsync(tess, [imgPath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6'], { timeout: 60000, maxBuffer: 10*1024*1024 });
-            combinedText += pageOcr + '\n';
-            fs.unlinkSync(imgPath); // Cleanup
-          } catch (e) {
-            // Stop if page doesn't exist
-            break;
-          }
-        }
-        return cleanText(combinedText);
-      } catch (pdf2picErr) {
-        console.error(`[OCR] PDF to Image fallback failed: ${pdf2picErr.message}`);
+  if (directOcrSuccess) return directOcrText;
+
+  // Fallback: convert PDF to image and OCR
+  try {
+    const fileId = uuidv4();
+    const options = {
+      density: DPI_SCAN,
+      saveFilename: `ocr_temp_${fileId}`,
+      savePath: os.tmpdir(),
+      format: "png",
+      width: 2480,
+      height: 3508
+    };
+    const storeAsImage = fromPath(filePath, options);
+    let combinedText = '';
+
+    // Determine actual page count via pdf-lib if possible
+    let totalPages = 10; // Default limit if we can't determine
+    try {
+        const fileBuffer = fs.readFileSync(filePath);
+        const doc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
+        totalPages = doc.getPageCount();
+    } catch (e) {
+        console.warn(`[OCR] Could not determine PDF page count for OCR, defaulting to ${totalPages} max.`);
+    }
+
+    // Convert ALL pages for complete extraction (required for legal documents)
+    for (let i = 1; i <= totalPages; i++) {
+      try {
+        const result = await storeAsImage(i);
+        const imgPath = result.path;
+        const { stdout: pageOcr } = await execFileAsync(tess, [imgPath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6'], { timeout: 60000, maxBuffer: 10*1024*1024 });
+        combinedText += pageOcr + '\n';
+        fs.unlinkSync(imgPath); // Cleanup
+      } catch (e) {
+        // Stop if page doesn't exist
+        break;
       }
     }
-    return '';
+
+    // Fallback to what we got if image conversion is worse
+    const finalConvertedText = cleanText(combinedText);
+    return finalConvertedText.length > directOcrText.length ? finalConvertedText : directOcrText;
+  } catch (pdf2picErr) {
+    console.error(`[OCR] PDF to Image fallback failed completely: ${pdf2picErr.message}`);
   }
+
+  return directOcrText; // Return whatever we have
 }
 
 // ══════════════════════════════════════════════════════════════
