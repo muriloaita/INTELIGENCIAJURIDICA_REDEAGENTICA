@@ -14,7 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, validate as validateUUID } from 'uuid';
 import { VertexClient } from './vertexClient.js';
 import { WorkflowEngine } from './workflowEngine.js';
 import { EmbeddingService } from './rag/embeddingService.js';
@@ -819,6 +819,10 @@ app.delete('/api/workflow/queue/:id', (req, res) => {
 // GET /api/workflow/:id/docx — Download da petição em Word (.docx)
 app.get('/api/workflow/:id/docx', (req, res) => {
   const workflowId = req.params.id;
+
+  if (!validateUUID(workflowId)) {
+    return res.status(400).json({ error: 'ID de workflow inválido.' });
+  }
 
   // 1) Tentar memória (rápido)
   const docxData = generatedDocxFiles.get(workflowId);
