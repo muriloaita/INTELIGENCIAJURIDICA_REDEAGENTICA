@@ -64,6 +64,21 @@ app.use('/api-proxy', proxyLimiter);
 
 const upload = multer({ dest: path.join(process.cwd(), 'uploads'), limits: { fileSize: 100 * 1024 * 1024 } });
 
+// ── Monitor de memória — reinicia preventivamente se heap > 1.5GB ──
+const MEMORY_LIMIT_MB = 1500;
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
+  const rssMB = Math.round(mem.rss / 1024 / 1024);
+  if (heapMB > 500) { // Só logar se significativo
+    console.log(`[Memory] Heap: ${heapMB}MB | RSS: ${rssMB}MB | Limite: ${MEMORY_LIMIT_MB}MB`);
+  }
+  if (heapMB > MEMORY_LIMIT_MB) {
+    console.error(`[Memory] ALERTA: Heap ${heapMB}MB excedeu limite de ${MEMORY_LIMIT_MB}MB. Reiniciando...`);
+    process.exit(1); // O wrapper start.js vai reiniciar automaticamente
+  }
+}, 120000); // A cada 2 minutos
+
 // Map de listeners SSE para workflows ativos
 const workflowListeners = new Map(); // workflowId -> Set<res>
 
