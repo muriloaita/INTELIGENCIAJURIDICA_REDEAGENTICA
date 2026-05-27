@@ -10,11 +10,11 @@ interface AguardandoProtocoloViewProps {
 
 export const AguardandoProtocoloView: React.FC<AguardandoProtocoloViewProps> = ({ peticoes, onFinalizarProtocolo, onBaixar }) => {
   return (
-    <div className="p-8 h-full flex flex-col animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-4 md:p-8 h-full flex flex-col animate-in fade-in duration-300">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">Revisados e Aguardando Protocolo</h2>
-          <p className="text-gray-500 text-sm">Peças aprovadas prontas para inserção no sistema do tribunal.</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">Revisados e Aguardando Protocolo</h2>
+          <p className="text-sm md:text-base text-gray-500">Peças aprovadas prontas para inserção no sistema do tribunal.</p>
         </div>
       </div>
 

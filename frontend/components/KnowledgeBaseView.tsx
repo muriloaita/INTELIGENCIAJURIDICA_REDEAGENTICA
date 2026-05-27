@@ -276,31 +276,31 @@ export const KnowledgeBaseView: React.FC = () => {
   const categorias = Object.keys(stats.porCategoria);
 
   return (
-    <div className="h-full overflow-y-auto p-8 custom-scrollbar relative z-10">
+    <div className="h-full overflow-y-auto p-4 md:p-8 custom-scrollbar relative z-10">
 
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-0">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center shrink-0">
                 <Icon name="Brain" size={22} className="text-brand-600" />
               </div>
               Base de Conhecimento
             </h2>
-            <p className="text-sm text-gray-500 mt-1">Gerencie documentos, faça buscas semânticas e alimente a inteligência dos agentes</p>
+            <p className="text-sm text-gray-500 mt-1 md:ml-14">Gerencie documentos, faça buscas semânticas e alimente a inteligência dos agentes</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             <button
               onClick={() => setShowIngestInput(!showIngestInput)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all shadow-sm"
+              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all shadow-sm"
             >
               <Icon name="FolderInput" size={18} />
               Ingerir Pasta Local
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition-all shadow-sm"
+              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-lg transition-all shadow-sm"
             >
               <Icon name="Upload" size={18} />
               Enviar Arquivos
@@ -546,16 +546,16 @@ export const KnowledgeBaseView: React.FC = () => {
 
       {/* Tabela de Documentos */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+        <div className="p-4 md:p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <Icon name="Table" size={20} className="text-gray-600" />
             Documentos Indexados
           </h3>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
             <select
               value={filterCategoria}
               onChange={(e) => { setFilterCategoria(e.target.value); setPage(1); }}
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-gray-700 bg-white"
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-gray-700 bg-white w-full sm:w-auto"
             >
               <option value="">Todas as categorias</option>
               {categorias.map(cat => (

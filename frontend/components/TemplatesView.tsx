@@ -34,15 +34,15 @@ export const TemplatesView: React.FC = () => {
   };
 
   return (
-    <div className="p-8 h-full flex flex-col animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-4 md:p-8 h-full flex flex-col animate-in fade-in duration-300">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">Biblioteca de Templates</h2>
-          <p className="text-gray-500 text-sm">Gerencie as estruturas documentais utilizadas pelo Agente A2.</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">Biblioteca de Templates</h2>
+          <p className="text-sm md:text-base text-gray-500">Gerencie as estruturas documentais utilizadas pelo Agente A2.</p>
         </div>
         <button 
           onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors shadow-sm font-medium"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors shadow-sm font-medium w-full md:w-auto"
         >
           <Icon name="Plus" size={18} />
           Novo Template

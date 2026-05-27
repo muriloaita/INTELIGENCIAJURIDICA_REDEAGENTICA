@@ -186,11 +186,27 @@ export const Dashboard: React.FC = () => {
     { id: 'config', label: 'Configuração de Agentes', icon: 'Settings' },
   ];
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-gray-900/50 z-30 md:hidden transition-opacity"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 border-r border-gray-200 bg-white hidden md:flex flex-col z-20 shadow-sm">
-        <div className="p-6 border-b border-gray-200 flex flex-col items-center justify-center gap-3">
+      <aside className={`fixed inset-y-0 left-0 w-64 border-r border-gray-200 bg-white flex-col z-40 shadow-sm transform transition-transform duration-300 md:relative md:flex md:translate-x-0 ${mobileMenuOpen ? 'translate-x-0 flex' : '-translate-x-full hidden md:flex'}`}>
+        <div className="p-6 border-b border-gray-200 flex flex-col items-center justify-center gap-3 relative">
+          <button
+            className="absolute top-4 right-4 md:hidden text-gray-500 hover:text-gray-700"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <Icon name="X" size={20} />
+          </button>
           
           {/* Logo Section with SVG Fallback */}
           <div className="w-full flex justify-center mb-2">
@@ -227,7 +243,10 @@ export const Dashboard: React.FC = () => {
           {navItems.map(item => (
             <button
               key={item.id}
-              onClick={() => setCurrentView(item.id)}
+              onClick={() => {
+                setCurrentView(item.id);
+                setMobileMenuOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left font-medium
                 ${currentView === item.id 
                   ? 'bg-brand-50 text-brand-700 border border-brand-200' 
@@ -265,38 +284,46 @@ export const Dashboard: React.FC = () => {
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         
         {/* Global Header */}
-        <header className="h-20 border-b border-gray-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-10 shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">
-              {navItems.find(i => i.id === currentView)?.label || 'Dashboard'}
-            </h2>
-            <p className="text-sm text-gray-500">Ecossistema de Automação e Inteligência</p>
+        <header className="h-auto min-h-20 py-4 border-b border-gray-200 bg-white/80 backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-8 z-10 shrink-0 gap-4 sm:gap-0">
+          <div className="flex items-center gap-3">
+            <button
+              className="md:hidden text-gray-700 hover:text-gray-900 focus:outline-none"
+              onClick={() => setMobileMenuOpen(true)}
+            >
+              <Icon name="Menu" size={24} />
+            </button>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                {navItems.find(i => i.id === currentView)?.label || 'Dashboard'}
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-500 hidden sm:block">Ecossistema de Automação e Inteligência</p>
+            </div>
           </div>
           
           {currentView === 'overview' && (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4 self-end sm:self-auto w-full sm:w-auto">
               {/* Botão Iniciar Fluxo — sempre visível para permitir cadastrar novos processos */}
               <button 
                 onClick={handleStartClick}
                 disabled={!canEnqueue}
-                className={`flex items-center gap-2 px-5 py-2.5 font-bold rounded-lg transition-all shadow-sm ${
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 font-bold rounded-lg transition-all shadow-sm text-sm sm:text-base ${
                   canEnqueue
                     ? 'bg-brand-600 hover:bg-brand-700 text-white'
                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }`}
               >
                 <Icon name="Plus" size={18} />
-                {canEnqueue ? 'Novo Processo' : `Fila Cheia (${queueLength}/${maxQueue})`}
+                <span className="truncate">{canEnqueue ? 'Novo Processo' : `Fila Cheia`}</span>
               </button>
 
               {/* Botão Parar — só aparece quando há um workflow em execução */}
               {(simStatus === 'running' || simStatus === 'awaiting_input') && (
                 <button 
                   onClick={stopSimulation}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-gray-50 text-red-600 border border-red-200 font-bold rounded-lg transition-all shadow-sm"
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 sm:px-5 py-2 sm:py-2.5 bg-white hover:bg-gray-50 text-red-600 border border-red-200 font-bold rounded-lg transition-all shadow-sm text-sm sm:text-base"
                 >
                   <Icon name="Square" size={18} />
-                  Parar Fluxo
+                  <span className="truncate">Parar Fluxo</span>
                 </button>
               )}
             </div>

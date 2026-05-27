@@ -66,22 +66,22 @@ export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig })
   const activeAgentDetails = AGENTS_LIST.find(a => a.id === selectedAgent);
 
   return (
-    <div className="p-8 h-full flex flex-col animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-4 md:p-8 h-full flex flex-col animate-in fade-in duration-300">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">Configuração de Agentes</h2>
-          <p className="text-gray-500 text-sm">Ajuste os parâmetros de MCP, RAG e instruções base para cada agente da rede.</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">Configuração de Agentes</h2>
+          <p className="text-sm md:text-base text-gray-500">Ajuste os parâmetros de MCP, RAG e instruções base para cada agente da rede.</p>
         </div>
       </div>
 
-      <div className="flex flex-1 gap-6 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 gap-6 overflow-hidden">
         {/* Sidebar - Agent List */}
-        <div className="w-1/3 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-2">
+        <div className="w-full md:w-1/3 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto custom-scrollbar md:pr-2 pb-2 md:pb-0 shrink-0 h-auto md:h-full">
           {AGENTS_LIST.map(agent => (
             <button
               key={agent.id}
               onClick={() => setSelectedAgent(agent.id)}
-              className={`flex flex-col items-start p-4 rounded-xl border transition-all text-left
+              className={`flex flex-col items-start p-3 md:p-4 rounded-xl border transition-all text-left min-w-[200px] md:min-w-0
                 ${selectedAgent === agent.id 
                   ? 'bg-white border-brand-500 shadow-md ring-1 ring-brand-500' 
                   : 'bg-white border-gray-200 hover:border-brand-300 hover:shadow-sm'
@@ -101,8 +101,8 @@ export const ConfigView: React.FC<ConfigViewProps> = ({ configs, onSaveConfig })
         </div>
 
         {/* Main Content - Configuration Form */}
-        <div className="w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
-          <div className="p-6 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+        <div className="w-full md:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col overflow-hidden h-full">
+          <div className="p-4 md:p-6 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-brand-50 text-brand-600 rounded-lg border border-brand-100">
                 <Icon name="Settings2" size={24} />
