@@ -389,18 +389,15 @@ function createWorkflowEventHandler(workflowId, prazoData) {
         const safeAutos = (prazoData.autos || 'sem_autos').replace(/[^a-zA-Z0-9.\-]/g, '_');
         const filename = `Peticao_${safeAutos}.docx`;
 
-        // Salvar em disco (sobrevive restart)
+        // Salvar em disco
         const diskPath = path.join(DOCX_OUTPUT_DIR, `${workflowId}.docx`);
         fs.writeFileSync(diskPath, buffer);
-
-        // Salvar em memória (acesso rápido)
-        generatedDocxFiles.set(workflowId, { buffer, filename });
 
         // Atualizar estado do workflow
         const wfState = workflowEngine.getWorkflowStatus(workflowId);
         if (wfState) wfState.docxUrl = `/api/workflow/${workflowId}/docx`;
 
-        console.log(`[Server] DOCX gerado: ${filename} (${buffer.length} bytes) → disco + memória`);
+        console.log(`[Server] DOCX gerado: ${filename} (${buffer.length} bytes) → disco`);
 
         // Broadcast SSE: DOCX pronto
         broadcastSSE(workflowId, {
@@ -629,8 +626,7 @@ app.post('/api-proxy', async (req, res) => {
   }
 });
 
-// Mapa de arquivos DOCX gerados (workflowId → { buffer, filename })
-const generatedDocxFiles = new Map();
+// DOCX files são salvos em disco em DOCX_OUTPUT_DIR (sem cache em memória para evitar leak)
 
 // ========================================
 // ROTAS DE WORKFLOW (Agentes de IA)
@@ -820,16 +816,7 @@ app.delete('/api/workflow/queue/:id', (req, res) => {
 app.get('/api/workflow/:id/docx', (req, res) => {
   const workflowId = req.params.id;
 
-  // 1) Tentar memória (rápido)
-  const docxData = generatedDocxFiles.get(workflowId);
-  if (docxData) {
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${docxData.filename}"`);
-    res.setHeader('Content-Length', docxData.buffer.length);
-    return res.send(docxData.buffer);
-  }
-
-  // 2) Tentar disco (sobrevive restart)
+  // Buscar do disco
   const diskPath = path.join(DOCX_OUTPUT_DIR, `${workflowId}.docx`);
   if (fs.existsSync(diskPath)) {
     const wf = workflowEngine?.getWorkflowStatus(workflowId);

@@ -22,6 +22,9 @@ export class WorkflowEngine {
     this.supabase = supabaseClient;
     this.ragSearch = ragSearch;
     this.activeWorkflows = new Map();
+
+    // Limpeza automática de workflows finalizados a cada 5 minutos
+    this._cleanupInterval = setInterval(() => this._cleanupOldWorkflows(), 5 * 60 * 1000);
   }
 
   /**
@@ -279,6 +282,9 @@ export class WorkflowEngine {
       if (wfFinal && wfFinal.status !== 'cancelled') {
         wfFinal.status = 'completed';
         wfFinal.currentPhase = null;
+        wfFinal.completedAt = new Date().toISOString();
+        // Limpar phaseResults pesados (já foram salvos no Supabase)
+        wfFinal.phaseResults = {};
         onEvent({ type: 'workflow_complete', workflowId });
       }
     } catch (error) {
@@ -287,6 +293,8 @@ export class WorkflowEngine {
       if (wfErr) {
         wfErr.status = 'error';
         wfErr.currentPhase = null;
+        wfErr.completedAt = new Date().toISOString();
+        wfErr.phaseResults = {};
       }
       onEvent({
         type: 'error',
@@ -296,6 +304,27 @@ export class WorkflowEngine {
     }
 
     return workflowId;
+  }
+
+  /**
+   * Limpa workflows finalizados há mais de 10 minutos para liberar memória
+   */
+  _cleanupOldWorkflows() {
+    const now = Date.now();
+    const MAX_AGE_MS = 10 * 60 * 1000; // 10 minutos
+    let cleaned = 0;
+    for (const [id, wf] of this.activeWorkflows) {
+      if (['completed', 'error', 'cancelled'].includes(wf.status)) {
+        const completedAt = wf.completedAt ? new Date(wf.completedAt).getTime() : 0;
+        if (completedAt && (now - completedAt) > MAX_AGE_MS) {
+          this.activeWorkflows.delete(id);
+          cleaned++;
+        }
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[WorkflowEngine] Cleanup: ${cleaned} workflow(s) removido(s). Ativos: ${this.activeWorkflows.size}`);
+    }
   }
 
   /**
