@@ -11,11 +11,11 @@ interface ProntasViewProps {
 
 export const ProntasView: React.FC<ProntasViewProps> = ({ peticoes, onRevisar, onBaixar, onProtocolar }) => {
   return (
-    <div className="p-8 h-full flex flex-col animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-4 md:p-8 h-full flex flex-col animate-in fade-in duration-300">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 md:mb-8 gap-4 md:gap-0">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">Petições Prontas (Fase 8)</h2>
-          <p className="text-gray-500 text-sm">Módulo de revisão humana, aprovação e envio para protocolo.</p>
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">Petições Prontas (Fase 8)</h2>
+          <p className="text-sm md:text-base text-gray-500">Módulo de revisão humana, aprovação e envio para protocolo.</p>
         </div>
       </div>
 

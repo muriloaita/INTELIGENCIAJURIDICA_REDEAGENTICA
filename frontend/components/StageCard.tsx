@@ -16,7 +16,7 @@ export const StageCard: React.FC<StageCardProps> = ({ stage, isActive, isComplet
     <div 
       onClick={onClick}
       className={`
-        relative p-5 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full bg-white
+        relative p-4 sm:p-5 rounded-xl border transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full bg-white
         ${isActive 
           ? 'border-brand-500 shadow-[0_0_15px_rgba(220,38,38,0.15)] scale-[1.02] ring-1 ring-brand-500' 
           : isCompleted
@@ -31,14 +31,14 @@ export const StageCard: React.FC<StageCardProps> = ({ stage, isActive, isComplet
       )}
 
       <div className="flex items-start justify-between mb-4">
-        <div className={`p-3 rounded-lg ${isActive ? 'bg-brand-50 text-brand-600' : 'bg-gray-100 text-gray-500'}`}>
-          <Icon name={stage.iconName} size={24} />
+        <div className={`p-2 sm:p-3 rounded-lg ${isActive ? 'bg-brand-50 text-brand-600' : 'bg-gray-100 text-gray-500'}`}>
+          <Icon name={stage.iconName} size={24} className="w-5 h-5 sm:w-6 sm:h-6" />
         </div>
-        <div className="flex gap-2 flex-wrap justify-end max-w-[50%]">
+        <div className="flex gap-2 flex-wrap justify-end max-w-[60%] sm:max-w-[50%]">
           {stage.agents.map(agent => (
             <span 
               key={agent} 
-              className={`text-xs font-mono px-2 py-1 rounded-md border ${AGENT_COLORS[agent] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+              className={`text-[10px] sm:text-xs font-mono px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md border ${AGENT_COLORS[agent] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
             >
               {agent}
             </span>
@@ -48,19 +48,19 @@ export const StageCard: React.FC<StageCardProps> = ({ stage, isActive, isComplet
 
       <div className="space-y-2 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">
+          <span className="text-[10px] sm:text-xs font-bold text-gray-600 bg-gray-100 px-1.5 sm:px-2 py-0.5 rounded-full border border-gray-200">
             Fase {stage.id}
           </span>
           {hasResult && (
-            <span className="text-[10px] font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 flex items-center gap-1">
+            <span className="text-[9px] sm:text-[10px] font-bold text-green-700 bg-green-50 px-1.5 sm:px-2 py-0.5 rounded-full border border-green-200 flex items-center gap-1">
               <Icon name="Check" size={10} /> Dados Obtidos
             </span>
           )}
         </div>
-        <h3 className={`text-lg font-bold leading-tight ${isActive ? 'text-brand-700' : 'text-gray-900'}`}>
+        <h3 className={`text-base sm:text-lg font-bold leading-tight ${isActive ? 'text-brand-700' : 'text-gray-900'}`}>
           {stage.shortTitle}
         </h3>
-        <p className="text-sm text-gray-500 line-clamp-2">
+        <p className="text-xs sm:text-sm text-gray-500 line-clamp-2">
           {stage.description}
         </p>
       </div>

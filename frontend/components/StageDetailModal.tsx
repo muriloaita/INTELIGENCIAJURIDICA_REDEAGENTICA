@@ -72,30 +72,30 @@ export const StageDetailModal: React.FC<StageDetailModalProps> = ({ stage, resul
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div 
-        className="bg-white border border-gray-200 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white border border-gray-200 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] md:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-6 border-b border-gray-200 flex items-start justify-between bg-gray-50">
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-xl bg-brand-50 text-brand-600 border border-brand-100">
+        <div className="p-4 md:p-6 border-b border-gray-200 flex items-start justify-between bg-gray-50">
+          <div className="flex items-center gap-3 md:gap-4">
+            <div className="p-2 md:p-3 rounded-xl bg-brand-50 text-brand-600 border border-brand-100 hidden sm:block">
               <Icon name={stage.iconName} size={32} />
             </div>
             <div>
-              <div className="text-brand-600 text-sm font-mono mb-1 font-semibold">Fase {stage.id}</div>
-              <h2 className="text-2xl font-bold text-gray-900">{stage.title}</h2>
+              <div className="text-brand-600 text-xs md:text-sm font-mono mb-1 font-semibold">Fase {stage.id}</div>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 leading-tight">{stage.title}</h2>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+            className="p-1.5 md:p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors shrink-0 ml-2"
           >
             <Icon name="X" size={24} />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto custom-scrollbar space-y-8">
+        <div className="p-4 md:p-6 overflow-y-auto custom-scrollbar space-y-6 md:space-y-8 flex-1">
           
           {showFullDetails ? (
             <div className="bg-gray-900 rounded-xl p-5 overflow-x-auto">
@@ -196,18 +196,18 @@ export const StageDetailModal: React.FC<StageDetailModalProps> = ({ stage, resul
         </div>
         
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+        <div className="p-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-0">
           <button 
             onClick={() => setShowFullDetails(!showFullDetails)}
-            className="px-4 py-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm"
+            className="w-full sm:w-auto justify-center px-4 py-2 text-brand-600 hover:bg-brand-50 rounded-lg transition-colors font-medium flex items-center gap-2 text-sm"
           >
             <Icon name={showFullDetails ? "LayoutList" : "Terminal"} size={18} />
-            {showFullDetails ? "Ver Resumo" : "Detalhamento Completo"}
+            <span className="truncate">{showFullDetails ? "Ver Resumo" : "Detalhamento Completo"}</span>
           </button>
           
           <button 
             onClick={onClose}
-            className="px-6 py-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors font-medium shadow-sm"
+            className="w-full sm:w-auto px-6 py-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-lg transition-colors font-medium shadow-sm"
           >
             Fechar Detalhes
           </button>
