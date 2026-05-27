@@ -15,17 +15,22 @@ import { createRequire } from 'module';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
+import { fromPath } from 'pdf2pic';
+import { v4 as uuidv4 } from 'uuid';
+import { PDFDocument } from 'pdf-lib';
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const mammoth = require('mammoth');
 
-const TESSERACT_LANG = 'por';
+const TESSERACT_LANG = 'por+eng'; // Fallback to english if portuguese characters aren't sufficient
 const DPI_SCAN = 300;
 const LIMITE_CHARS = 50;
 const TESSERACT_PATHS = [
   'C:\\Program Files\\Tesseract-OCR\\tesseract.exe',
   'C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe',
   path.join(os.homedir(), 'AppData', 'Local', 'Tesseract-OCR', 'tesseract.exe'),
+  '/usr/bin/tesseract',
+  '/usr/local/bin/tesseract',
 ];
 
 
@@ -120,6 +125,74 @@ export async function extractTextFromImage(filePath) {
   } catch (err) { console.error(`[OCR] Erro: ${err.message}`); return ''; }
 }
 
+async function performOcrOnPdf(filePath) {
+  const tess = await findTesseract();
+  if (!tess) return '';
+
+  let directOcrText = '';
+  let directOcrSuccess = false;
+
+  try {
+    // Attempt direct PDF reading first (works if compiled with poppler/leptonica)
+    const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
+    directOcrText = cleanText(ocrOut);
+    if (directOcrText.length > LIMITE_CHARS) {
+        directOcrSuccess = true;
+    }
+  } catch (err) {
+      console.warn(`[OCR] Tesseract direct PDF read failed: ${err.message}. Triggering Ghostscript fallback.`);
+  }
+
+  if (directOcrSuccess) return directOcrText;
+
+  // Fallback: convert PDF to image and OCR
+  try {
+    const fileId = uuidv4();
+    const options = {
+      density: DPI_SCAN,
+      saveFilename: `ocr_temp_${fileId}`,
+      savePath: os.tmpdir(),
+      format: "png",
+      width: 2480,
+      height: 3508
+    };
+    const storeAsImage = fromPath(filePath, options);
+    let combinedText = '';
+
+    // Determine actual page count via pdf-lib if possible
+    let totalPages = 10; // Default limit if we can't determine
+    try {
+        const fileBuffer = fs.readFileSync(filePath);
+        const doc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
+        totalPages = doc.getPageCount();
+    } catch (e) {
+        console.warn(`[OCR] Could not determine PDF page count for OCR, defaulting to ${totalPages} max.`);
+    }
+
+    // Convert ALL pages for complete extraction (required for legal documents)
+    for (let i = 1; i <= totalPages; i++) {
+      try {
+        const result = await storeAsImage(i);
+        const imgPath = result.path;
+        const { stdout: pageOcr } = await execFileAsync(tess, [imgPath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6'], { timeout: 60000, maxBuffer: 10*1024*1024 });
+        combinedText += pageOcr + '\n';
+        fs.unlinkSync(imgPath); // Cleanup
+      } catch (e) {
+        // Stop if page doesn't exist
+        break;
+      }
+    }
+
+    // Fallback to what we got if image conversion is worse
+    const finalConvertedText = cleanText(combinedText);
+    return finalConvertedText.length > directOcrText.length ? finalConvertedText : directOcrText;
+  } catch (pdf2picErr) {
+    console.error(`[OCR] PDF to Image fallback failed completely: ${pdf2picErr.message}`);
+  }
+
+  return directOcrText; // Return whatever we have
+}
+
 // ══════════════════════════════════════════════════════════════
 //  EXTRAÇÃO DE TEXTO — PDF (via processo filho isolado)
 //  Cada PDF roda em subprocess separado → memória 100% liberada
@@ -159,14 +232,7 @@ export async function extractTextFromPDF(filePath) {
     if (result.error) {
       console.warn(`[PDF]   Worker erro: ${result.error}`);
       // Fallback: tentar OCR direto
-      const tess = await findTesseract();
-      if (tess) {
-        try {
-          const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
-          return cleanText(ocrOut);
-        } catch {}
-      }
-      return '';
+      return await performOcrOnPdf(filePath);
     }
 
     let finalText = cleanText(result.text || '');
@@ -183,14 +249,8 @@ export async function extractTextFromPDF(filePath) {
     // Se pouco texto digital → OCR fallback
     if (finalText.length < LIMITE_CHARS) {
       console.log(`[PDF]   Pouco texto (${finalText.length} chars). Tentando OCR...`);
-      const tess = await findTesseract();
-      if (tess) {
-        try {
-          const { stdout: ocrOut } = await execFileAsync(tess, [filePath, 'stdout', '-l', TESSERACT_LANG, '--psm', '6', '--dpi', String(DPI_SCAN)], { timeout: 120000, maxBuffer: 20*1024*1024 });
-          const ocrText = cleanText(ocrOut);
-          if (ocrText.length > finalText.length) finalText = ocrText;
-        } catch {}
-      }
+      const ocrText = await performOcrOnPdf(filePath);
+      if (ocrText.length > finalText.length) finalText = ocrText;
     }
 
     return finalText;
